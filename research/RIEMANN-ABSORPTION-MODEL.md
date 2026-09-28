@@ -337,7 +337,7 @@ The idea-generation workers failed (GPT hit its quota; Grok stalled; see `report
 6. **Evaluation harness** (tests): 3–5 questions per test document, each tagged with its Kintsch level and the level expected to answer it.
 
 ### 3b. Plan changes that need Sam's OK
-- **A local event log** (JSONL of dial moves, dwell per node, re-visits and idle gaps). It breaks the persistence rule, but it's the foundation for all adaptivity. If collection is unreliable, everything built on it fails (Li et al. personal-informatics stage model).
+- **A local event log** (**approved 2026-09-28**; JSONL of dial moves, dwell per node, re-visits and idle gaps). It breaks the persistence rule, but it's the foundation for all adaptivity. If collection is unreliable, everything built on it fails (Li et al. personal-informatics stage model).
 - **Objective chip**, with v1 limited to understand, learn and reference (reference = search plus a highlighted source).
 - **A collapsed "leaves out" line.** It costs an extra generation pass per level.
 - **Spacing controls.**
@@ -380,14 +380,32 @@ The literature can't settle these for one person, but Riemann can: randomise bet
 8. Event-cued vs time-cued reminders.
 9. Paginated L3 vs scrolling.
 
-## 5. Decisions only Sam can make
+## 5. Decisions
 
-- **Scope of "execute."** Riemann surfaces the next action and removes friction, but never acts in the world. ChatGPT's brief imagines an "executive assistant" that does things on your behalf. That would be a change to Riemann's founding scope, not a feature.
-- **Learning-mode friction:** how much effort study mode may ask for. The evidence says some; satisfaction says little.
-- **Defaults vs control:** is "open at L1, reopen where I left off" right, or should it always reopen where you left off?
-- **Four levels:** four labelled detents, with a three-level fallback (gist / sections / source) if they feel like a maze.
+### Made by Sam, 2026-09-28
+1. **Execute = suggestions only.** Riemann surfaces the next action and removes friction; Sam acts.
+2. **The local event log is approved** (§3b).
+3. **Learn-mode friction is delegated to the orchestrator.** The rule:
+   - no added effort outside learn mode;
+   - in learn mode, at most one predict-before-reveal per document (at a major expansion), one ~5–10 s factual recall check at the end, and an optional explain-back offer;
+   - all skippable in one tap, never at low capacity or when anxious, and fewer of them automatically if Sam skips most over a week;
+   - experiment 5 tests whether they pay off.
+4. **No fixed number of levels. Depth adapts to the content, and zooming is continuous.** See §5.1.
+
+### 5.1 Adaptive depth and continuous zoom (replaces "L0–L3")
+- **No research supports a fixed level count.**
+  - RAPTOR-style recursive trees get their depth from how long the content is.
+  - Forte's practitioner funnel suggests compressing about 2.5–4× per layer (W).
+  - Nielsen's "more than 2 disclosure levels confuses people" (✓fc) warns against *discrete modes to track*, not against depth.
+- **Depth emerges.** Build bottom-up, compressing about 4× per step (tunable; W), and stop a branch once it fits the gist budget (~25 words). Depth ≈ 1 + ⌈log₄(words/25)⌉, per branch, so the tree is ragged: a short section stops early. Skip any level that compresses less than ~2× compared with the one below it.
+  - Examples: a 150-word note gets 2 levels; 1,500 words about 4; 20,000 words about 6.
+- **The dial is continuous.** Dial position z ∈ [0, 1] maps to a *frontier* through the tree. Between two depths, nodes expand **one at a time, outward from the anchored passage first, then by importance** (Nelson's stretchtext "expansion throttle"). Each expansion crossfades a gist into its children (150–250 ms) while the anchor holds still.
+- **No level names.** The readout is a small note like "~2 min · 12% of original", and the L0 line stays as the header. This removes the Nielsen tension, because there are no disclosure levels to keep track of.
+- **Everywhere else in this document, "L0" means the root gist, "L1" the ~2-minute frontier and "L3" the source.** They are positions on a continuous dial, not modes.
+
+### 5.2 Still open (low stakes; defaults chosen)
+- **Defaults vs control:** reopen where Sam left off (default). A new document opens at the ~2-minute frontier.
 - **Stability vs novelty:** a fixed core, with novelty at the edges.
-- **The event log** (§3b).
 
 ## 6. Myths to avoid building
 - **Learning-styles matching** ✗ ✓fc
