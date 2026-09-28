@@ -1,0 +1,514 @@
+[
+ {
+  "id": "A01",
+  "text": "Durable internal learning (recall/transfer) is the goal",
+  "axis": "objective",
+  "holds": {
+   "understand": "C",
+   "learn": "Y",
+   "remember": "Y",
+   "decide": "N",
+   "plan": "N",
+   "execute": "N",
+   "monitor": "N",
+   "reference": "N",
+   "communicate": "N"
+  }
+ },
+ {
+  "id": "A02",
+  "text": "A mental model of the content is wanted now",
+  "axis": "objective",
+  "holds": {
+   "understand": "Y",
+   "learn": "Y",
+   "remember": "C",
+   "decide": "C",
+   "plan": "C",
+   "execute": "N",
+   "monitor": "N",
+   "reference": "N",
+   "communicate": "C"
+  }
+ },
+ {
+  "id": "A03",
+  "text": "Holding the information in Sam's own memory is better than storing it externally",
+  "axis": "objective",
+  "holds": {
+   "understand": "C",
+   "learn": "Y",
+   "remember": "Y",
+   "decide": "N",
+   "plan": "N",
+   "execute": "N",
+   "monitor": "N",
+   "reference": "N",
+   "communicate": "N"
+  }
+ },
+ {
+  "id": "A04",
+  "text": "Effortful processing by Sam improves the outcome being optimised",
+  "axis": "objective",
+  "holds": {
+   "understand": "C",
+   "learn": "Y",
+   "remember": "Y",
+   "decide": "C",
+   "plan": "C",
+   "execute": "N",
+   "monitor": "N",
+   "reference": "N",
+   "communicate": "C"
+  }
+ },
+ {
+  "id": "A05",
+  "text": "Sam engages with the content itself (not just an extracted fact/action/output)",
+  "axis": "objective",
+  "holds": {
+   "understand": "Y",
+   "learn": "Y",
+   "remember": "Y",
+   "decide": "C",
+   "plan": "C",
+   "execute": "N",
+   "monitor": "N",
+   "reference": "C",
+   "communicate": "C"
+  }
+ },
+ {
+  "id": "A06",
+  "text": "Content is expository/explanatory prose",
+  "axis": "content",
+  "holds": {
+   "understand": "Y",
+   "learn": "Y",
+   "remember": "Y",
+   "decide": "Y",
+   "plan": "Y",
+   "execute": "Y",
+   "monitor": "Y",
+   "reference": "Y",
+   "communicate": "Y"
+  }
+ },
+ {
+  "id": "A07",
+  "text": "Content is longer than working memory can hold (~>1 page)",
+  "axis": "content",
+  "holds": {
+   "understand": "Y",
+   "learn": "Y",
+   "remember": "Y",
+   "decide": "Y",
+   "plan": "Y",
+   "execute": "Y",
+   "monitor": "Y",
+   "reference": "Y",
+   "communicate": "Y"
+  }
+ },
+ {
+  "id": "A08",
+  "text": "Sam is a novice (low prior knowledge) in this topic",
+  "axis": "user",
+  "holds": {
+   "understand": "Y",
+   "learn": "Y",
+   "remember": "Y",
+   "decide": "Y",
+   "plan": "Y",
+   "execute": "Y",
+   "monitor": "Y",
+   "reference": "Y",
+   "communicate": "Y"
+  }
+ },
+ {
+  "id": "A09",
+  "text": "Consumption is self-paced (re-readable), not transient",
+  "axis": "modality",
+  "holds": {
+   "understand": "Y",
+   "learn": "Y",
+   "remember": "Y",
+   "decide": "Y",
+   "plan": "Y",
+   "execute": "Y",
+   "monitor": "Y",
+   "reference": "Y",
+   "communicate": "Y"
+  }
+ },
+ {
+  "id": "A10",
+  "text": "Reading happens on a screen",
+  "axis": "context",
+  "holds": {
+   "understand": "Y",
+   "learn": "Y",
+   "remember": "Y",
+   "decide": "Y",
+   "plan": "Y",
+   "execute": "Y",
+   "monitor": "Y",
+   "reference": "Y",
+   "communicate": "Y"
+  }
+ },
+ {
+  "id": "A11",
+  "text": "Population is an adult with ADHD (Sam)",
+  "axis": "population",
+  "holds": {
+   "understand": "Y",
+   "learn": "Y",
+   "remember": "Y",
+   "decide": "Y",
+   "plan": "Y",
+   "execute": "Y",
+   "monitor": "Y",
+   "reference": "Y",
+   "communicate": "Y"
+  }
+ },
+ {
+  "id": "A12",
+  "text": "General-population results transfer to a single adult ADHD user",
+  "axis": "transfer",
+  "holds": {
+   "understand": "Y",
+   "learn": "Y",
+   "remember": "Y",
+   "decide": "Y",
+   "plan": "Y",
+   "execute": "Y",
+   "monitor": "Y",
+   "reference": "Y",
+   "communicate": "Y"
+  }
+ },
+ {
+  "id": "A13",
+  "text": "Lab/classroom results transfer to self-directed real-world use",
+  "axis": "transfer",
+  "holds": {
+   "understand": "Y",
+   "learn": "Y",
+   "remember": "Y",
+   "decide": "Y",
+   "plan": "Y",
+   "execute": "Y",
+   "monitor": "Y",
+   "reference": "Y",
+   "communicate": "Y"
+  }
+ },
+ {
+  "id": "A14",
+  "text": "LLM-generated output, with source links, is faithful enough to rely on",
+  "axis": "scope",
+  "holds": {
+   "understand": "Y",
+   "learn": "C",
+   "remember": "C",
+   "decide": "C",
+   "plan": "C",
+   "execute": "C",
+   "monitor": "C",
+   "reference": "C",
+   "communicate": "C"
+  }
+ },
+ {
+  "id": "A15",
+  "text": "Errors at gist level are tolerable (low stakes of a missed detail)",
+  "axis": "objective",
+  "holds": {
+   "understand": "Y",
+   "learn": "C",
+   "remember": "C",
+   "decide": "N",
+   "plan": "C",
+   "execute": "N",
+   "monitor": "C",
+   "reference": "N",
+   "communicate": "N"
+  }
+ },
+ {
+  "id": "A16",
+  "text": "Sam is under time pressure",
+  "axis": "context",
+  "holds": {
+   "understand": "Y",
+   "learn": "Y",
+   "remember": "Y",
+   "decide": "Y",
+   "plan": "Y",
+   "execute": "Y",
+   "monitor": "Y",
+   "reference": "Y",
+   "communicate": "Y"
+  }
+ },
+ {
+  "id": "A17",
+  "text": "Capacity/attention fluctuates within and across sessions",
+  "axis": "population",
+  "holds": {
+   "understand": "Y",
+   "learn": "Y",
+   "remember": "Y",
+   "decide": "Y",
+   "plan": "Y",
+   "execute": "Y",
+   "monitor": "Y",
+   "reference": "Y",
+   "communicate": "Y"
+  }
+ },
+ {
+  "id": "A18",
+  "text": "Sam wants to steer navigation himself (vs be directed)",
+  "axis": "objective",
+  "holds": {
+   "understand": "Y",
+   "learn": "C",
+   "remember": "C",
+   "decide": "Y",
+   "plan": "Y",
+   "execute": "C",
+   "monitor": "N",
+   "reference": "Y",
+   "communicate": "Y"
+  }
+ },
+ {
+  "id": "A19",
+  "text": "A one-tap explicit input is tolerable",
+  "axis": "context",
+  "holds": {
+   "understand": "Y",
+   "learn": "Y",
+   "remember": "Y",
+   "decide": "Y",
+   "plan": "Y",
+   "execute": "Y",
+   "monitor": "Y",
+   "reference": "Y",
+   "communicate": "Y"
+  }
+ },
+ {
+  "id": "A20",
+  "text": "Proactive surfacing/interruption by Riemann is wanted",
+  "axis": "objective",
+  "holds": {
+   "understand": "N",
+   "learn": "C",
+   "remember": "Y",
+   "decide": "C",
+   "plan": "C",
+   "execute": "Y",
+   "monitor": "Y",
+   "reference": "N",
+   "communicate": "C"
+  }
+ },
+ {
+  "id": "A21",
+  "text": "A visual display is available (not voice-only)",
+  "axis": "modality",
+  "holds": {
+   "understand": "Y",
+   "learn": "Y",
+   "remember": "Y",
+   "decide": "Y",
+   "plan": "Y",
+   "execute": "Y",
+   "monitor": "Y",
+   "reference": "Y",
+   "communicate": "Y"
+  }
+ },
+ {
+  "id": "A22",
+  "text": "Content has explicit structure (headings/sections)",
+  "axis": "content",
+  "holds": {
+   "understand": "Y",
+   "learn": "Y",
+   "remember": "Y",
+   "decide": "Y",
+   "plan": "Y",
+   "execute": "Y",
+   "monitor": "Y",
+   "reference": "Y",
+   "communicate": "Y"
+  }
+ },
+ {
+  "id": "A23",
+  "text": "Success = an external outcome is completed (not internal knowledge)",
+  "axis": "objective",
+  "holds": {
+   "understand": "N",
+   "learn": "N",
+   "remember": "N",
+   "decide": "Y",
+   "plan": "Y",
+   "execute": "Y",
+   "monitor": "Y",
+   "reference": "C",
+   "communicate": "Y"
+  }
+ },
+ {
+  "id": "A24",
+  "text": "The task is deadline-bound",
+  "axis": "objective",
+  "holds": {
+   "understand": "C",
+   "learn": "C",
+   "remember": "C",
+   "decide": "C",
+   "plan": "Y",
+   "execute": "Y",
+   "monitor": "Y",
+   "reference": "C",
+   "communicate": "C"
+  }
+ },
+ {
+  "id": "A25",
+  "text": "Sam will return to this later, so resumption matters",
+  "axis": "objective",
+  "holds": {
+   "understand": "C",
+   "learn": "Y",
+   "remember": "Y",
+   "decide": "C",
+   "plan": "Y",
+   "execute": "Y",
+   "monitor": "Y",
+   "reference": "N",
+   "communicate": "C"
+  }
+ },
+ {
+  "id": "A26",
+  "text": "Alternatives must be compared",
+  "axis": "objective",
+  "holds": {
+   "understand": "C",
+   "learn": "C",
+   "remember": "N",
+   "decide": "Y",
+   "plan": "C",
+   "execute": "N",
+   "monitor": "C",
+   "reference": "C",
+   "communicate": "N"
+  }
+ },
+ {
+  "id": "A27",
+  "text": "The output is for another person",
+  "axis": "objective",
+  "holds": {
+   "understand": "N",
+   "learn": "N",
+   "remember": "N",
+   "decide": "N",
+   "plan": "N",
+   "execute": "N",
+   "monitor": "N",
+   "reference": "N",
+   "communicate": "Y"
+  }
+ },
+ {
+  "id": "A28",
+  "text": "Riemann only processes/presents; it never acts in the world",
+  "axis": "scope",
+  "holds": {
+   "understand": "Y",
+   "learn": "Y",
+   "remember": "Y",
+   "decide": "Y",
+   "plan": "Y",
+   "execute": "C",
+   "monitor": "Y",
+   "reference": "Y",
+   "communicate": "C"
+  }
+ },
+ {
+  "id": "A29",
+  "text": "Detail from the original is valuable in itself",
+  "axis": "objective",
+  "holds": {
+   "understand": "C",
+   "learn": "Y",
+   "remember": "C",
+   "decide": "N",
+   "plan": "C",
+   "execute": "N",
+   "monitor": "N",
+   "reference": "C",
+   "communicate": "C"
+  }
+ },
+ {
+  "id": "A30",
+  "text": "Compression/summarisation is the right transformation (vs. restructuring into actions, plans, tables)",
+  "axis": "objective",
+  "holds": {
+   "understand": "Y",
+   "learn": "Y",
+   "remember": "C",
+   "decide": "C",
+   "plan": "N",
+   "execute": "N",
+   "monitor": "N",
+   "reference": "N",
+   "communicate": "C"
+  }
+ },
+ {
+  "id": "A31",
+  "text": "Repetition/spacing over time is worthwhile",
+  "axis": "objective",
+  "holds": {
+   "understand": "N",
+   "learn": "Y",
+   "remember": "Y",
+   "decide": "N",
+   "plan": "N",
+   "execute": "N",
+   "monitor": "N",
+   "reference": "N",
+   "communicate": "N"
+  }
+ },
+ {
+  "id": "A32",
+  "text": "Sam generating it himself (prediction, explanation, plan) beats being given it",
+  "axis": "objective",
+  "holds": {
+   "understand": "C",
+   "learn": "Y",
+   "remember": "Y",
+   "decide": "C",
+   "plan": "C",
+   "execute": "N",
+   "monitor": "N",
+   "reference": "N",
+   "communicate": "C"
+  }
+ }
+]

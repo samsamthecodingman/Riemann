@@ -1,0 +1,47 @@
+{
+ "understand": {
+  "optimises": "mental-model formation now",
+  "success": "can explain/reason about it now",
+  "ai_role": "explainer"
+ },
+ "learn": {
+  "optimises": "comprehension + retention + transfer",
+  "success": "recall and transfer later",
+  "ai_role": "tutor"
+ },
+ "remember": {
+  "optimises": "reliable later retrieval (internal or supported)",
+  "success": "it's available when needed",
+  "ai_role": "memory coach / aid"
+ },
+ "decide": {
+  "optimises": "relevant evidence + comparison",
+  "success": "a decision Sam endorses, made on time",
+  "ai_role": "analyst"
+ },
+ "plan": {
+  "optimises": "dependencies + sequencing",
+  "success": "a realistic plan Sam commits to",
+  "ai_role": "planner (Sam owns the plan)"
+ },
+ "execute": {
+  "optimises": "next action + minimal friction",
+  "success": "the action gets done (by Sam)",
+  "ai_role": "prompter / friction-remover (never actor)"
+ },
+ "monitor": {
+  "optimises": "change detection with minimal attention",
+  "success": "nothing important missed, little attention spent",
+  "ai_role": "watch officer"
+ },
+ "reference": {
+  "optimises": "retrieval speed + precision",
+  "success": "the exact fact, fast",
+  "ai_role": "index"
+ },
+ "communicate": {
+  "optimises": "accurate transmission to someone else",
+  "success": "recipient gets it right",
+  "ai_role": "briefing aide (Sam sends)"
+ }
+}
