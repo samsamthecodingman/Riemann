@@ -427,6 +427,23 @@ python3 research/ledger/ledger.py features          # feature × objective table
 python3 research/ledger/ledger.py render            # regenerate VIEWS.md
 ```
 
+**State on 2026-09-28:**
+- 225 findings across 20 report files; no open research cells.
+- Findings applying to each objective (Y or C, out of 225):
+
+  | Objective | Findings that apply |
+  |---|---|
+  | learn | 215 |
+  | understand | 191 |
+  | communicate | 180 |
+  | plan | 178 |
+  | decide | 174 |
+  | execute | 155 |
+  | monitor | 155 |
+  | reference | 147 |
+
+- **Known imperfection:** assumptions were tagged by LLM workers against a necessity rule. A few borderline tags remain, such as F07-07 and F18-02, which arguably apply to every objective. Treat `impact` output as a triage list to read, not a verdict.
+
 **To add a new objective or user group:**
 1. Add a column in `assumptions.json`, using `?` where unsure.
 2. Run `impact`.
