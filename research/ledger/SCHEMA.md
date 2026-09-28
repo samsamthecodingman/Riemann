@@ -43,7 +43,11 @@ OBSERVATION → EVIDENCE → ASSUMPTIONS → CLAIM → DESIGN IMPLICATION → FE
 ```
 
 ### Rules for writers
-- **Assumptions are the point.** For each finding, list *every* canonical assumption that must hold for the implication to apply to Riemann, especially the objective ones (A01–A05, A23) and the transfer ones (A11–A13). If none fits, propose a new one.
+- **Assumptions are the point, and only *necessary* ones count.** Tag an assumption only if it passes the **necessity test**: *"if this assumption were false, would this implication stop applying (or invert)?"* Relevant-but-not-necessary context belongs in `population` / `context`, not in `assumptions`.
+  - Why: the applicability rule treats any failing assumption as "doesn't apply". Over-tagging silently removes universal findings (faithfulness, typography, accessibility, orientation, shame-free design) from life-admin objectives. The first extraction pass did exactly that: execute showed 108 of 146 findings as N.
+  - Aim for 0–3 assumptions per record.
+  - Objective assumptions (A01–A05, A15, A18, A20, A23, A29–A32) apply only to findings specifically about learning, effort or generation, proactivity, detail, or compression.
+  - If none fits, propose a new one.
 - `confidence` is lower than the evidence grade whenever the transfer assumptions (A12, A13) are doing heavy lifting.
 - One finding = one claim. Split compound findings.
 - Myths get `grade: "MYTH"` and an implication with `effect: "opposes"`.
