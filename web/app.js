@@ -28,6 +28,7 @@
     dwellNode: null,
     idleTimer: null,
     lastInputAt: Date.now(),
+    lastDialChangeAt: 0,
     events: [],
   };
 
@@ -43,6 +44,46 @@
   const $popover = el("source-popover");
   const $resumeCard = el("resume-card");
   const $resumeCardText = el("resume-card-text");
+  const $zoomHint = el("zoom-hint");
+
+  // ---------------------------------------------------------------------
+  // Pointer tracking — used to resolve "the passage under the pointer" for
+  // every zoom gesture (Z-drag, ctrl+wheel/pinch, arrow/+-  keys).
+  // ---------------------------------------------------------------------
+  const lastMouse = { x: null, y: null };
+  window.addEventListener(
+    "mousemove",
+    (e) => {
+      lastMouse.x = e.clientX;
+      lastMouse.y = e.clientY;
+    },
+    { passive: true }
+  );
+
+  function isPointOverContent(x, y) {
+    if (x == null || y == null) return false;
+    const rect = $content.getBoundingClientRect();
+    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+  }
+
+  function nodeAtScreenPoint(x, y) {
+    const hit = document.elementFromPoint(x, y);
+    const found = hit && hit.closest && hit.closest("[data-node-id]");
+    if (found) return found.dataset.nodeId;
+    // Fell in the gap between nodes: pick the nearest by vertical distance.
+    let best = null;
+    let bestDist = Infinity;
+    for (const n of $content.querySelectorAll("[data-node-id]")) {
+      const r = n.getBoundingClientRect();
+      if (y >= r.top && y <= r.bottom) return n.dataset.nodeId;
+      const d = y < r.top ? r.top - y : y - r.bottom;
+      if (d < bestDist) {
+        bestDist = d;
+        best = n;
+      }
+    }
+    return best ? best.dataset.nodeId : null;
+  }
 
   // ---------------------------------------------------------------------
   // Event log — batched POST /api/events every 5s, sendBeacon on pagehide
@@ -219,6 +260,14 @@
     return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
+  // Natural (pre-transform) rects from the most recent render, keyed by
+  // node id. FLIP applies a `transform` to persisted nodes immediately
+  // after layout, which getBoundingClientRect() reflects right away — so
+  // anything that needs the node's *true* resting position (the anchor
+  // reposition logic in setZ) must read from here, not query the live DOM
+  // mid-transition.
+  let lastRenderRects = new Map();
+
   function render(opts) {
     opts = opts || {};
     const tree = state.tree;
@@ -239,6 +288,7 @@
       $content.style.opacity = "0";
       setTimeout(() => {
         doRender();
+        if (opts.onRendered) opts.onRendered();
         requestAnimationFrame(() => {
           $content.style.opacity = "1";
           setTimeout(() => $content.classList.remove("column-crossfade"), 200);
@@ -248,11 +298,19 @@
     }
 
     doRender();
+    if (opts.onRendered) opts.onRendered();
 
     function doRender() {
       $content.innerHTML = state.frontier.map((id) => renderNodeHTML(tree.nodes[id])).join("");
       updateRootHeader();
       updateBreadcrumb();
+
+      // Capture true post-layout, pre-transform rects for every rendered
+      // node before any FLIP transform is applied below.
+      lastRenderRects = new Map();
+      for (const elNode of $content.querySelectorAll("[data-node-id]")) {
+        lastRenderRects.set(elNode.dataset.nodeId, elNode.getBoundingClientRect());
+      }
 
       if (REDUCED_MOTION) return;
 
@@ -261,7 +319,7 @@
         const id = elNode.dataset.nodeId;
         if (prevRects.has(id)) {
           const oldRect = prevRects.get(id);
-          const newRect = elNode.getBoundingClientRect();
+          const newRect = lastRenderRects.get(id);
           const dy = oldRect.top - newRect.top;
           if (Math.abs(dy) > 0.5) {
             elNode.style.transform = `translateY(${dy}px)`;
@@ -341,60 +399,162 @@
   // ---------------------------------------------------------------------
   // Dial control
   // ---------------------------------------------------------------------
-  function setZ(newZ, inputType) {
+  function setZ(newZ, inputType, forcedBeforeY) {
     markInput();
+    state.lastDialChangeAt = Date.now();
     const clamped = Math.max(0, Math.min(1, newZ));
     const zFrom = state.z;
     if (!state.anchorNodeId) setAnchor(findCentreNodeId());
 
-    // Record pre-expansion anchor screen position.
-    const anchorEl = $content.querySelector(`[data-node-id="${state.anchorNodeId}"]`);
-    const beforeY = anchorEl ? anchorEl.getBoundingClientRect().top : null;
+    // Record pre-expansion anchor screen position: either the y the caller
+    // wants preserved (the pointer's y, for a zoom-at-pointer gesture), or
+    // the anchor's own current on-screen position otherwise.
+    // The invariant: the exact point in the source text under the pointer
+    // (state.anchorOffset, a char offset) stays at the same screen y. A node's
+    // text is treated as spread evenly over its box, so a char offset maps to
+    // a y inside whichever rendered node currently contains it.
+    let beforeY = forcedBeforeY;
+    if (beforeY == null) {
+      const anchorEl = $content.querySelector(`[data-node-id="${state.anchorNodeId}"]`);
+      beforeY = anchorEl ? yOfOffset(state.anchorNodeId, anchorEl.getBoundingClientRect(), state.anchorOffset) : null;
+    }
 
     state.z = clamped;
     const { frontier } = window.Frontier.frontierAtZ(state.tree, state.sequence, state.z);
     state.frontier = frontier;
 
-    const bigJump = Math.abs(clamped - zFrom) > 0.15;
-    render({ columnCrossfade: bigJump });
-
-    // Re-anchor: find replacement for the old anchor and restore its screen y.
-    requestAnimationFrame(() => {
-      const offset = state.anchorOffset != null ? state.anchorOffset : 0;
-      const replacement = window.Frontier.findFrontierNodeAtOffset(state.tree, state.frontier, offset);
-      if (replacement) {
-        state.anchorNodeId = replacement;
-        const n = state.tree.nodes[replacement];
-        state.anchorOffset = (n.source_span[0] + n.source_span[1]) / 2;
-        const repEl = $content.querySelector(`[data-node-id="${replacement}"]`);
-        if (repEl && beforeY != null) {
-          const afterY = repEl.getBoundingClientRect().top;
-          window.scrollBy(0, afterY - beforeY);
+    // The deferred whole-column crossfade is only for deliberate big jumps
+    // (home, clicking the indicator). During a continuous gesture it raced
+    // with the next queued step and applied steps to a stale layout.
+    const GESTURES = ["zkey", "ctrlwheel", "key"];
+    const bigJump = Math.abs(clamped - zFrom) > 0.15 && !GESTURES.includes(inputType);
+    // Re-anchor as soon as the new content is actually in the DOM (not on a
+    // *separate* rAF after render — a queued next step, e.g. mid Z-drag or
+    // wheel burst, must see the corrected scroll position immediately, or
+    // pointer-anchoring drifts across consecutive fast steps).
+    render({
+      columnCrossfade: bigJump,
+      onRendered: () => {
+        const offset = state.anchorOffset != null ? state.anchorOffset : 0;
+        const replacement = window.Frontier.findFrontierNodeAtOffset(state.tree, state.frontier, offset);
+        if (replacement) {
+          // Keep anchorOffset fixed for the whole gesture; resetting it to the
+          // replacement's midpoint each step made the pointed-at text drift.
+          state.anchorNodeId = replacement;
+          // Use the natural (pre-FLIP-transform) rect, not a live query —
+          // a persisted node's live rect right now reflects its transform,
+          // i.e. its *old* visual position, not where it will actually
+          // rest once the transition finishes.
+          const afterRect = lastRenderRects.get(replacement);
+          if (afterRect && beforeY != null) {
+            window.scrollBy(0, yOfOffset(replacement, afterRect, offset) - beforeY);
+          }
         }
-      }
+      },
     });
 
     updateReadout();
     savePositionDebounced();
-    if (state.tree) logEvent("dial", { tree_id: state.tree.id, z_from: zFrom, z_to: clamped, input: inputType || "slider" });
+    dismissHint();
+    if (state.tree) {
+      logEvent("dial", {
+        tree_id: state.tree.id,
+        z_from: zFrom,
+        z_to: clamped,
+        input: inputType || "indicator",
+        anchor_node_id: state.anchorNodeId,
+      });
+    }
   }
 
-  function stepZ(deltaExpansions, inputType) {
+  // Resolve "the passage under the pointer" (or its fallback: viewport
+  // centre) into an anchor node + the y to keep it pinned at, and lock it
+  // in as the current anchor (recomputing the expansion sequence once).
+  // This is called exactly once per gesture — at the moment Z goes down,
+  // or at the first tick of a wheel/pinch burst — never per-step, or every
+  // step would re-shuffle the sequence around a slightly different anchor
+  // and the frontier would jump instead of moving incrementally.
+  function beginPointerGesture(px, py) {
+    let x = px;
+    let y = py;
+    if (x == null || y == null) {
+      x = lastMouse.x;
+      y = lastMouse.y;
+    }
+    let anchorId;
+    let anchorY;
+    if (isPointOverContent(x, y)) {
+      anchorId = nodeAtScreenPoint(x, y) || findCentreNodeId();
+      anchorY = y;
+    } else {
+      anchorId = findCentreNodeId();
+      const el2 = $content.querySelector(`[data-node-id="${anchorId}"]`);
+      anchorY = window.innerHeight / 2;
+    }
+    if (anchorId && anchorId !== state.anchorNodeId) setAnchor(anchorId);
+    // Pin the exact text position under the pointer (not the node's midpoint).
+    const el = anchorId && $content.querySelector(`[data-node-id="${anchorId}"]`);
+    if (el) state.anchorOffset = offsetAtY(anchorId, el.getBoundingClientRect(), anchorY);
+    return anchorY;
+  }
+
+  // Char offset <-> screen y inside a rendered node, assuming its text is
+  // spread evenly over the node's box (good enough at paragraph scale).
+  function offsetAtY(nodeId, rect, y) {
+    const [s0, s1] = state.tree.nodes[nodeId].source_span;
+    const frac = rect.height > 0 ? Math.min(1, Math.max(0, (y - rect.top) / rect.height)) : 0.5;
+    return s0 + frac * (s1 - s0);
+  }
+  function yOfOffset(nodeId, rect, offset) {
+    const [s0, s1] = state.tree.nodes[nodeId].source_span;
+    const frac = s1 > s0 ? Math.min(1, Math.max(0, (offset - s0) / (s1 - s0))) : 0.5;
+    return rect.top + frac * rect.height;
+  }
+
+  // rAF-coalesced step queue for a single locked gesture: steps accumulate
+  // here and apply at most once per animation frame (against the fixed
+  // anchor + y captured by beginPointerGesture), so rendering never backs
+  // up behind a fast stream of mousemove/wheel events.
+  let lockedPendingSteps = 0;
+  let lockedInput = null;
+  let lockedY = null;
+  let lockedRaf = false;
+  function queueLockedSteps(n, inputType, fixedY) {
+    lockedPendingSteps += n;
+    lockedInput = inputType;
+    lockedY = fixedY;
+    if (lockedRaf) return;
+    lockedRaf = true;
+    requestAnimationFrame(() => {
+      lockedRaf = false;
+      const n2 = lockedPendingSteps;
+      lockedPendingSteps = 0;
+      if (n2 === 0 || !state.tree) return;
+      const total = Math.max(1, state.sequence.length);
+      setZ(state.z + n2 / total, lockedInput, lockedY);
+    });
+  }
+
+  // A single discrete keyboard action (arrow keys, +/-): resolve the
+  // pointer anchor fresh (it's one atomic step, so there's no sequence to
+  // keep stable across it) and apply immediately.
+  function stepOnce(deltaSteps, inputType) {
+    if (!state.tree || deltaSteps === 0) return;
+    const anchorY = beginPointerGesture(lastMouse.x, lastMouse.y);
     const total = Math.max(1, state.sequence.length);
-    setZ(state.z + deltaExpansions / total, inputType);
+    setZ(state.z + deltaSteps / total, inputType, anchorY);
   }
 
+  // ---- Keyboard: arrow keys / Home / End on the focused dial ----
   $dial.addEventListener("keydown", (e) => {
     switch (e.key) {
       case "ArrowRight":
         e.preventDefault();
-        if (e.shiftKey) setZ(state.z + 0.1, "key");
-        else stepZ(1, "key");
+        stepOnce(e.shiftKey ? 5 : 1, "key");
         break;
       case "ArrowLeft":
         e.preventDefault();
-        if (e.shiftKey) setZ(state.z - 0.1, "key");
-        else stepZ(-1, "key");
+        stepOnce(e.shiftKey ? -5 : -1, "key");
         break;
       case "Home":
         e.preventDefault();
@@ -407,21 +567,112 @@
     }
   });
 
-  $dial.addEventListener(
+  // ---- Keyboard: =/- as a global expand/collapse-one-step alternative ----
+  document.addEventListener("keydown", (e) => {
+    if (!$app.classList.contains("active")) return;
+    const tag = (e.target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea") return;
+    if (e.key === "=" || e.key === "+") {
+      e.preventDefault();
+      stepOnce(1, "key");
+    } else if (e.key === "-" || e.key === "_") {
+      e.preventDefault();
+      stepOnce(-1, "key");
+    }
+  });
+
+  // ---- Gesture 1: hold Z + move the mouse horizontally ----
+  // The anchor locks in once, when Z goes down. ~24px per expansion step,
+  // accumulated from the position when Z went down. Key auto-repeat is
+  // ignored; the gesture ends on keyup or blur.
+  const Z_STEP_PX = 24;
+  let zHeld = false;
+  let zStartX = null;
+  let zAppliedSteps = 0;
+  let zGestureY = null;
+  function zMoveHandler(e) {
+    if (!zHeld || zStartX == null) return;
+    const totalDeltaX = e.clientX - zStartX;
+    const targetSteps = Math.trunc(totalDeltaX / Z_STEP_PX);
+    const diff = targetSteps - zAppliedSteps;
+    if (diff !== 0) {
+      zAppliedSteps = targetSteps;
+      queueLockedSteps(diff, "zkey", zGestureY);
+    }
+  }
+  function endZGesture() {
+    if (!zHeld) return;
+    zHeld = false;
+    zStartX = null;
+    zAppliedSteps = 0;
+    zGestureY = null;
+    document.body.classList.remove("zoom-drag-active");
+    window.removeEventListener("mousemove", zMoveHandler);
+  }
+  document.addEventListener("keydown", (e) => {
+    if (!$app.classList.contains("active")) return;
+    if (e.key !== "z" && e.key !== "Z") return;
+    if (e.repeat || zHeld) return;
+    const tag = (e.target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea") return;
+    zHeld = true;
+    zStartX = lastMouse.x;
+    zAppliedSteps = 0;
+    zGestureY = beginPointerGesture(lastMouse.x, lastMouse.y);
+    document.body.classList.add("zoom-drag-active");
+    window.addEventListener("mousemove", zMoveHandler);
+  });
+  document.addEventListener("keyup", (e) => {
+    if (e.key === "z" || e.key === "Z") endZGesture();
+  });
+  window.addEventListener("blur", endZGesture);
+
+  // ---- Gesture 2: Ctrl+wheel and trackpad pinch (arrives as ctrl+wheel) ----
+  // ~100 deltaY units per step for a real mouse wheel; pinch deltas are
+  // typically small/fractional, so they're scaled more aggressively (a
+  // comfortable pinch spans ~6 units per step) so it lands 1-3 steps. The
+  // anchor locks in at the first tick of a burst and holds until ~250ms of
+  // wheel inactivity, so a rapid run of ticks doesn't re-shuffle mid-burst.
+  let wheelAccum = 0;
+  let wheelBurstActive = false;
+  let wheelGestureY = null;
+  let wheelBurstTimer = null;
+  window.addEventListener(
     "wheel",
     (e) => {
-      if (!e.ctrlKey) return;
+      if (!$app.classList.contains("active") || !e.ctrlKey) return;
       e.preventDefault();
-      const total = Math.max(1, state.sequence.length);
-      setZ(state.z - Math.sign(e.deltaY) / total, "wheel");
+      if (!wheelBurstActive) {
+        wheelGestureY = beginPointerGesture(e.clientX, e.clientY);
+        wheelBurstActive = true;
+      }
+      clearTimeout(wheelBurstTimer);
+      wheelBurstTimer = setTimeout(() => {
+        wheelBurstActive = false;
+      }, 250);
+
+      const magnitude = Math.abs(e.deltaY);
+      const looksLikePinch = magnitude > 0 && (magnitude < 4 || !Number.isInteger(e.deltaY));
+      const divisor = looksLikePinch ? 6 : 100;
+      wheelAccum += -e.deltaY / divisor;
+      const steps = Math.trunc(wheelAccum);
+      if (steps !== 0) {
+        wheelAccum -= steps;
+        queueLockedSteps(steps, "ctrlwheel", wheelGestureY);
+      }
     },
     { passive: false }
   );
 
+  // ---- The passive indicator: click/drag still sets z directly ----
   $dial.addEventListener("click", (e) => {
     const rect = $dial.getBoundingClientRect();
     const frac = (e.clientX - rect.left) / rect.width;
-    setZ(frac, "slider");
+    setZ(frac, "indicator");
+  });
+
+  el("home-btn").addEventListener("click", () => {
+    setZ(0, "indicator");
   });
 
   // hold-and-drag on the readout for fine control
@@ -438,12 +689,47 @@
     window.addEventListener("mousemove", (e) => {
       if (!dragging) return;
       const dy = startY - e.clientY;
-      setZ(startZ + dy / 400, "slider");
+      setZ(startZ + dy / 400, "indicator");
     });
     window.addEventListener("mouseup", () => {
       dragging = false;
     });
   })();
+
+  // ---------------------------------------------------------------------
+  // One-time hint: shown on the very first open ever, gone after the first
+  // successful zoom gesture or 8s, and never shown again.
+  // ---------------------------------------------------------------------
+  const HINT_KEY = "riemann:hint-seen";
+  let hintTimer = null;
+  function hintSeen() {
+    try {
+      return localStorage.getItem(HINT_KEY) === "1";
+    } catch (e) {
+      return true;
+    }
+  }
+  function markHintSeen() {
+    try {
+      localStorage.setItem(HINT_KEY, "1");
+    } catch (e) {
+      /* storage unavailable; nothing to persist */
+    }
+  }
+  function maybeShowHint() {
+    if (!$zoomHint || hintSeen()) return;
+    markHintSeen(); // mark now so it can never show twice, even if interrupted
+    $zoomHint.hidden = false;
+    requestAnimationFrame(() => $zoomHint.classList.add("visible"));
+    hintTimer = setTimeout(dismissHint, 8000);
+  }
+  function dismissHint() {
+    if (!$zoomHint || $zoomHint.hidden) return;
+    clearTimeout(hintTimer);
+    hintTimer = null;
+    $zoomHint.classList.remove("visible");
+    $zoomHint.hidden = true;
+  }
 
   // ---------------------------------------------------------------------
   // Minimal chrome toggle
@@ -595,12 +881,21 @@
     flushEvents(false);
 
     if (saved) showResumeCard(anchorId);
+    maybeShowHint();
 
-    window.addEventListener("scroll", debounce(() => {
-      const centreId = findCentreNodeId();
-      if (centreId && centreId !== state.anchorNodeId) setAnchor(centreId);
-      updateReadout();
-    }, 150));
+    window.addEventListener(
+      "scroll",
+      debounce(() => {
+        // Programmatic scrollBy calls from a dial-driven re-anchor (setZ)
+        // also fire native 'scroll' events; picking up viewport-centre here
+        // right after one would fight the pointer-anchored gesture that
+        // caused the scroll. Skip while that's recent.
+        if (Date.now() - state.lastDialChangeAt < 400) return;
+        const centreId = findCentreNodeId();
+        if (centreId && centreId !== state.anchorNodeId) setAnchor(centreId);
+        updateReadout();
+      }, 150)
+    );
   }
 
   function showResumeCard(anchorId) {

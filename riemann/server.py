@@ -121,4 +121,15 @@ async def api_recent() -> list[dict]:
 
 
 WEB_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
+class RevalidatingStaticFiles(StaticFiles):
+    """Static files the browser must revalidate on every load. Without this the
+    browser kept serving stale app.js/style.css after edits, which made fixed
+    bugs look unfixed. Local-only app, so the extra 304 round-trips cost nothing."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/", RevalidatingStaticFiles(directory=str(WEB_DIR), html=True), name="web")

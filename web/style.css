@@ -245,16 +245,30 @@ button {
 }
 
 #breadcrumb {
-  max-width: 70ch;
-  margin: 0.35rem auto 0;
   font-size: 0.8rem;
   color: var(--text-muted);
-  display: none;
+  /* Out of the layout flow entirely: an overlay line under the sticky header.
+     Its contents change with the anchor (and used to wrap to 2-3 lines), and
+     any change in the header's height shifted the very text the zoom anchor
+     was holding still. */
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  padding: 0.3rem 16px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--rule);
+  display: flex;
+  visibility: hidden;
   gap: 0.3rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+#breadcrumb button { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 
 #breadcrumb.visible {
-  display: flex;
+  visibility: visible;
 }
 
 #breadcrumb button {
@@ -453,10 +467,13 @@ body.minimal-chrome #content {
   gap: 0.75rem;
 }
 
+/* Thin passive indicator: the dial is no longer the primary control (that's
+   the Z-drag / ctrl+wheel gestures), so it's reduced to a 3px fill line
+   along the bottom edge, still clickable/draggable and still a real
+   role="slider" for keyboard and screen-reader users. */
 #dial {
   flex: 1;
-  height: 6px;
-  border-radius: 999px;
+  height: 3px;
   accent-color: var(--accent);
   cursor: pointer;
   background: var(--rule);
@@ -465,6 +482,51 @@ body.minimal-chrome #content {
 
 #dial:focus-visible {
   outline: 2px solid var(--focus);
+}
+
+/* While Z is held for a drag-to-zoom gesture. */
+body.zoom-drag-active,
+body.zoom-drag-active * {
+  cursor: ew-resize !important;
+}
+
+/* One-time hint near the readout. */
+#zoom-hint {
+  position: fixed;
+  bottom: 3.4rem;
+  right: 16px;
+  z-index: 25;
+  max-width: 34ch;
+  background: var(--bg-raised);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 0.55rem 0.75rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 200ms ease, transform 200ms ease;
+  pointer-events: none;
+}
+
+#zoom-hint.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+#zoom-hint kbd {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  background: var(--accent-soft);
+  border-radius: 3px;
+  padding: 0 0.3em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #zoom-hint {
+    transition: none;
+  }
 }
 
 #dial-readout {
