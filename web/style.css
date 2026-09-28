@@ -287,7 +287,7 @@ button {
 
 #minimal-toggle {
   position: fixed;
-  bottom: 1rem;
+  bottom: 4.25rem; /* sits above the dial bar instead of over its readout */
   right: 1rem;
   z-index: 30;
   background: var(--bg-raised);
@@ -323,7 +323,7 @@ body.minimal-chrome #content {
      the same screen position, even when collapsing makes the text shorter than the viewport. */
   padding: 1.5rem 16px 55vh;
 }
-#content::before { content: ""; display: block; height: 40vh; }
+#top-spacer { height: 0; }
 
 #content.column-crossfade {
   transition: opacity var(--transition-fast) ease;

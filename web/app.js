@@ -45,6 +45,12 @@
   const $resumeCard = el("resume-card");
   const $resumeCardText = el("resume-card-text");
   const $zoomHint = el("zoom-hint");
+  const $topSpacer = el("top-spacer");
+  let topSpacerPx = 0;
+  function resetTopSpacer() {
+    topSpacerPx = 0;
+    $topSpacer.style.height = "0px";
+  }
 
   // ---------------------------------------------------------------------
   // Pointer tracking — used to resolve "the passage under the pointer" for
@@ -393,7 +399,9 @@
   });
 
   el("home-btn").addEventListener("click", () => {
+    resetTopSpacer();
     setZ(0, "home");
+    window.scrollTo(0, 0);
   });
 
   // ---------------------------------------------------------------------
@@ -404,6 +412,14 @@
     state.lastDialChangeAt = Date.now();
     const clamped = Math.max(0, Math.min(1, newZ));
     const zFrom = state.z;
+    // Pushing past either end (or a sub-step change) alters nothing visible:
+    // skip the re-render entirely rather than re-anchoring against itself.
+    if (state.sequence && state.frontier &&
+        window.Frontier.zToK(clamped, state.sequence.length) === window.Frontier.zToK(zFrom, state.sequence.length)) {
+      state.z = clamped;
+      updateReadout();
+      return;
+    }
     if (!state.anchorNodeId) setAnchor(findCentreNodeId());
 
     // Record pre-expansion anchor screen position: either the y the caller
@@ -447,7 +463,18 @@
           // rest once the transition finishes.
           const afterRect = lastRenderRects.get(replacement);
           if (afterRect && beforeY != null) {
-            window.scrollBy(0, yOfOffset(replacement, afterRect, offset) - beforeY);
+            const delta = yOfOffset(replacement, afterRect, offset) - beforeY;
+            // Near the top of the page a collapse can need a negative scroll
+            // position. Grow the top spacer just enough instead of keeping a
+            // permanent empty gap above the text.
+            const deficit = -(window.scrollY + delta);
+            if (deficit > 0) {
+              topSpacerPx += deficit;
+              $topSpacer.style.height = `${topSpacerPx}px`;
+              window.scrollTo(0, 0);
+            } else {
+              window.scrollBy(0, delta);
+            }
           }
         }
       },
@@ -858,6 +885,7 @@
   }
 
   function openTree(tree, opts) {
+    resetTopSpacer();
     opts = opts || {};
     state.tree = tree;
     $startScreen.style.display = "none";
