@@ -1,0 +1,55 @@
+# Manual eval questions for tests/eval/run_eval.py.
+#
+# kintsch: which level of comprehension (van Dijk & Kintsch) the question
+#   probes -- surface (exact wording/fact), textbase (local relations,
+#   paraphrase-level), or situation (integrated, big-picture inference).
+# expected_z: the dial position at which we'd expect the frontier to
+#   contain enough detail to answer the question.
+
+- doc: 150-photosynthesis.md
+  questions:
+    - question: "What pigment absorbs sunlight inside chloroplasts?"
+      kintsch: surface
+      expected_z: 0.0
+    - question: "What are the two named stages of photosynthesis?"
+      kintsch: textbase
+      expected_z: 0.0
+    - question: "Why does photosynthesis matter for regulating Earth's climate?"
+      kintsch: situation
+      expected_z: 0.0
+
+- doc: 1500-internet-plumbing.md
+  questions:
+    - question: "What does DNS stand for?"
+      kintsch: surface
+      expected_z: 0.3
+    - question: "Which protocol trades reliability guarantees for lower, more predictable latency?"
+      kintsch: surface
+      expected_z: 0.4
+    - question: "Why does TCP implement congestion control rather than always sending as fast as possible?"
+      kintsch: textbase
+      expected_z: 0.5
+    - question: "How does packet switching's efficiency advantage relate to its unpredictable latency?"
+      kintsch: situation
+      expected_z: 0.8
+    - question: "Why does understanding these protocols help someone turn 'the internet is broken' into a more specific question?"
+      kintsch: situation
+      expected_z: 0.9
+
+- doc: 8000-software-systems.md
+  questions:
+    - question: "What three pillars of observability does the document name?"
+      kintsch: surface
+      expected_z: 0.4
+    - question: "What financial term does the document borrow to describe accumulated shortcuts in a codebase?"
+      kintsch: surface
+      expected_z: 0.3
+    - question: "Why do mature teams treat mitigation and root-causing as distinct phases of an incident?"
+      kintsch: textbase
+      expected_z: 0.5
+    - question: "What single underlying purpose does the document argue connects all of the engineering practices it describes?"
+      kintsch: situation
+      expected_z: 0.95
+    - question: "How does the document connect a blameless postmortem culture to how much damage an incident ends up causing?"
+      kintsch: situation
+      expected_z: 0.85

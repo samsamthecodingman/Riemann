@@ -2,10 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "web-fixture",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8766", "--directory", "web"],
-      "port": 8766
+      "name": "riemann",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "uvicorn", "riemann.server:app", "--port", "8765"],
+      "port": 8765
     }
   ]
 }

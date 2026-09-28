@@ -89,7 +89,15 @@ class Tree(BaseModel):
 
 ## Summariser
 - `Summariser` is a Protocol with `async summarise(prompt: str, system: str) -> str` (JSON text).
-- **`ClaudeSummariser`** uses `claude_agent_sdk.query()`:
+- **Provider selection:** env `RIEMANN_PROVIDER` = `proxy` (default) | `agent-sdk`. `get_summariser()` in `summarise.py` is the factory server.py (and everything else) should use.
+- **`ProxySummariser`** (default) talks to Sam's local CLIProxyAPI, an OpenAI-compatible proxy, so summarisation doesn't spend Agent SDK credit:
+  - `httpx.AsyncClient` POST to `{RIEMANN_PROXY_URL}/v1/chat/completions`, default `http://127.0.0.1:8317`. Deliberately **not** the Headroom proxy on 8787, which compresses prompts and would alter source text, breaking faithfulness.
+  - Body: `{"model": RIEMANN_MODEL, "messages": [{"role":"system",...},{"role":"user",...}], "temperature": 0.2}`. Reads `choices[0].message.content`.
+  - Model from `RIEMANN_MODEL`, default `claude-sonnet-5`.
+  - API key from env `RIEMANN_PROXY_KEY`, else the first entry under `api-keys:` in `~/.cli-proxy-api/config.yaml` (a tiny line parser, no PyYAML dependency). Never logged or printed.
+  - Timeout 120s. Retries once on 429/5xx or connection errors, with backoff.
+  - A `model_cooldown` error code from the proxy raises a clear error naming the model and telling Sam to set `RIEMANN_MODEL` to another model (e.g. `gemini-3.8-flash-high`).
+- **`ClaudeSummariser`** (the alternative, `RIEMANN_PROVIDER=agent-sdk`) uses `claude_agent_sdk.query()`:
   - no tools, `max_turns=1`
   - model from the env var `RIEMANN_MODEL`, default `claude-sonnet-5`
   - auth is the local Claude Code login; **never** read or require an API key
