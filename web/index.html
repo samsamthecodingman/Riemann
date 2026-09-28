@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Riemann</title>
+<link rel="stylesheet" href="style.css" />
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+
+<div id="resume-card" role="status">
+  <span id="resume-card-text"></span>
+  <button id="resume-card-dismiss" aria-label="Dismiss">&times;</button>
+</div>
+
+<main id="start-screen">
+  <h1>Riemann</h1>
+  <p class="tagline">Paste something long. Zoom in on the parts you need.</p>
+
+  <div class="start-block">
+    <label for="paste-text">Paste text</label>
+    <textarea id="paste-text" placeholder="Paste an article, a doc, a transcript&hellip;"></textarea>
+    <div class="start-row" style="margin-top: 0.75rem;">
+      <button id="paste-submit" class="primary-btn">Build</button>
+      <span id="paste-error" class="start-error" hidden></span>
+    </div>
+  </div>
+
+  <div class="start-block">
+    <label for="file-input">Upload a file (.md, .txt, .pdf)</label>
+    <input id="file-input" type="file" accept=".md,.txt,.pdf,text/markdown,text/plain,application/pdf" />
+  </div>
+
+  <div class="start-block">
+    <label for="url-input">Or give a URL</label>
+    <div class="start-row">
+      <input id="url-input" type="url" placeholder="https://&hellip;" />
+      <button id="url-submit" class="primary-btn">Build</button>
+    </div>
+  </div>
+
+  <div id="recent-block" class="start-block" hidden>
+    <label>Recent</label>
+    <ul id="recent-list"></ul>
+  </div>
+</main>
+
+<div id="app">
+  <header id="root-header">
+    <div class="header-row">
+      <button id="home-btn" title="Home (z = 0)" aria-label="Home">&#8962;</button>
+      <div id="root-gist"></div>
+    </div>
+    <nav id="breadcrumb" aria-label="Breadcrumb"></nav>
+  </header>
+
+  <div id="content" role="feed" aria-label="Document content"></div>
+
+  <div id="source-popover" role="tooltip"></div>
+
+  <footer id="dial-bar">
+    <div class="dial-row">
+      <div
+        id="dial"
+        role="slider"
+        tabindex="0"
+        aria-label="Zoom level"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow="0"
+      ></div>
+      <div id="dial-readout" title="Drag up or down for fine control"></div>
+      <button id="not-helpful">not helpful</button>
+    </div>
+  </footer>
+
+  <button id="minimal-toggle" title="Toggle minimal chrome (m)" aria-label="Toggle minimal chrome">&#9670;</button>
+</div>
+
+<div id="live-region" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
+
+<script src="frontier.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

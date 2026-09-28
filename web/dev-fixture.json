@@ -1,0 +1,475 @@
+{
+  "id": "fixture0000000",
+  "title": "How Continuous Zoom Reading Works (fixture)",
+  "source_text": "The dial's leftmost setting shows nothing but the root gist: a single claim standing in for the whole source.\n\nAt full expansion this branch reveals the fine print behind section A, including the exact wording the summary compressed.\n\nSection A also has a short aside that never needed a summary of its own, since it was already brief.\n\nA second short aside sits beside the first, covering a related point that the build step chose not to merge.\n\nSection B opens with a leaf that stayed a leaf because summarising it further would have lost the specific numbers.\n\nUnderneath section B's second child is a leaf describing the method in plain terms, short enough to read directly.\n\nDeep inside section B is a leaf holding the first of two edge cases the method has to handle.\n\nRight beside it is the second edge case, which behaves differently enough to deserve its own paragraph.\n\nSection B's third child bottoms out in a single leaf that lists the caveats readers usually ask about.\n\nSection B closes with a leaf summarising who reviewed the work and when it was last revised.\n\nSection C begins with a leaf about the historical context that motivated the whole document in the first place.\n\nA second leaf in section C lays out the competing view that the authors ultimately rejected and why.\n\nSection C's third branch splits into a leaf describing the first proposed fix in careful, testable language.\n\nBeside it sits the second proposed fix, framed as an alternative with different tradeoffs worth weighing.\n\n```\ndef apply_fix(x):\n    # atomic code block, never summarised\n    return x * 2\n```",
+  "source_words": 272,
+  "root": "n0",
+  "nodes": {
+    "n111": {
+      "id": "n111",
+      "depth": 3,
+      "text": "The dial's leftmost setting shows nothing but the root gist: a single claim standing in for the whole source.",
+      "words": 19,
+      "children": [],
+      "parent": "n11",
+      "is_leaf": true,
+      "source_span": [
+        0,
+        109
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false
+    },
+    "n1121": {
+      "id": "n1121",
+      "depth": 4,
+      "text": "At full expansion this branch reveals the fine print behind section A, including the exact wording the summary compressed.",
+      "words": 19,
+      "children": [],
+      "parent": "n112",
+      "is_leaf": true,
+      "source_span": [
+        111,
+        233
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false
+    },
+    "n12": {
+      "id": "n12",
+      "depth": 2,
+      "text": "Section A also has a short aside that never needed a summary of its own, since it was already brief.",
+      "words": 20,
+      "children": [],
+      "parent": "n1",
+      "is_leaf": true,
+      "source_span": [
+        235,
+        335
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false
+    },
+    "n13": {
+      "id": "n13",
+      "depth": 2,
+      "text": "A second short aside sits beside the first, covering a related point that the build step chose not to merge.",
+      "words": 20,
+      "children": [],
+      "parent": "n1",
+      "is_leaf": true,
+      "source_span": [
+        337,
+        445
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false
+    },
+    "n21": {
+      "id": "n21",
+      "depth": 2,
+      "text": "Section B opens with a leaf that stayed a leaf because summarising it further would have lost the specific numbers.",
+      "words": 20,
+      "children": [],
+      "parent": "n2",
+      "is_leaf": true,
+      "source_span": [
+        447,
+        562
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false
+    },
+    "n221": {
+      "id": "n221",
+      "depth": 3,
+      "text": "Underneath section B's second child is a leaf describing the method in plain terms, short enough to read directly.",
+      "words": 19,
+      "children": [],
+      "parent": "n22",
+      "is_leaf": true,
+      "source_span": [
+        564,
+        678
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false
+    },
+    "n2221": {
+      "id": "n2221",
+      "depth": 4,
+      "text": "Deep inside section B is a leaf holding the first of two edge cases the method has to handle.",
+      "words": 19,
+      "children": [],
+      "parent": "n222",
+      "is_leaf": true,
+      "source_span": [
+        680,
+        773
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false
+    },
+    "n2222": {
+      "id": "n2222",
+      "depth": 4,
+      "text": "Right beside it is the second edge case, which behaves differently enough to deserve its own paragraph.",
+      "words": 17,
+      "children": [],
+      "parent": "n222",
+      "is_leaf": true,
+      "source_span": [
+        775,
+        878
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false
+    },
+    "n231": {
+      "id": "n231",
+      "depth": 3,
+      "text": "Section B's third child bottoms out in a single leaf that lists the caveats readers usually ask about.",
+      "words": 18,
+      "children": [],
+      "parent": "n23",
+      "is_leaf": true,
+      "source_span": [
+        880,
+        982
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false
+    },
+    "n24": {
+      "id": "n24",
+      "depth": 2,
+      "text": "Section B closes with a leaf summarising who reviewed the work and when it was last revised.",
+      "words": 17,
+      "children": [],
+      "parent": "n2",
+      "is_leaf": true,
+      "source_span": [
+        984,
+        1076
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false
+    },
+    "n31": {
+      "id": "n31",
+      "depth": 2,
+      "text": "Section C begins with a leaf about the historical context that motivated the whole document in the first place.",
+      "words": 19,
+      "children": [],
+      "parent": "n3",
+      "is_leaf": true,
+      "source_span": [
+        1078,
+        1189
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false
+    },
+    "n32": {
+      "id": "n32",
+      "depth": 2,
+      "text": "A second leaf in section C lays out the competing view that the authors ultimately rejected and why.",
+      "words": 18,
+      "children": [],
+      "parent": "n3",
+      "is_leaf": true,
+      "source_span": [
+        1191,
+        1291
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false
+    },
+    "n331": {
+      "id": "n331",
+      "depth": 3,
+      "text": "Section C's third branch splits into a leaf describing the first proposed fix in careful, testable language.",
+      "words": 17,
+      "children": [],
+      "parent": "n33",
+      "is_leaf": true,
+      "source_span": [
+        1293,
+        1401
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false
+    },
+    "n332": {
+      "id": "n332",
+      "depth": 3,
+      "text": "Beside it sits the second proposed fix, framed as an alternative with different tradeoffs worth weighing.",
+      "words": 16,
+      "children": [],
+      "parent": "n33",
+      "is_leaf": true,
+      "source_span": [
+        1403,
+        1508
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false
+    },
+    "n34": {
+      "id": "n34",
+      "depth": 2,
+      "text": "```\ndef apply_fix(x):\n    # atomic code block, never summarised\n    return x * 2\n```",
+      "words": 14,
+      "children": [],
+      "parent": "n3",
+      "is_leaf": true,
+      "source_span": [
+        1510,
+        1594
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": true
+    },
+    "n0": {
+      "id": "n0",
+      "depth": 0,
+      "text": "The document argues for a layered, zoomable way of reading long material.",
+      "words": 12,
+      "children": [
+        "n1",
+        "n2",
+        "n3"
+      ],
+      "parent": null,
+      "is_leaf": false,
+      "source_span": [
+        0,
+        1594
+      ],
+      "cites": [
+        "n111",
+        "n1121",
+        "n12"
+      ],
+      "importance": 1.0,
+      "atomic": false
+    },
+    "n1": {
+      "id": "n1",
+      "depth": 1,
+      "text": "Section A introduces the core idea and two short supporting asides.",
+      "words": 11,
+      "children": [
+        "n11",
+        "n12",
+        "n13"
+      ],
+      "parent": "n0",
+      "is_leaf": false,
+      "source_span": [
+        0,
+        445
+      ],
+      "cites": [
+        "n111",
+        "n1121"
+      ],
+      "importance": 0.9,
+      "atomic": false
+    },
+    "n11": {
+      "id": "n11",
+      "depth": 2,
+      "text": "The core idea splits into a plain-language leaf and a deeper technical branch.",
+      "words": 13,
+      "children": [
+        "n111",
+        "n112"
+      ],
+      "parent": "n1",
+      "is_leaf": false,
+      "source_span": [
+        0,
+        233
+      ],
+      "cites": [
+        "n111",
+        "n1121"
+      ],
+      "importance": 0.7,
+      "atomic": false
+    },
+    "n112": {
+      "id": "n112",
+      "depth": 3,
+      "text": "The technical branch expands once more into the full fine print.",
+      "words": 11,
+      "children": [
+        "n1121"
+      ],
+      "parent": "n11",
+      "is_leaf": false,
+      "source_span": [
+        111,
+        233
+      ],
+      "cites": [
+        "n1121"
+      ],
+      "importance": 0.6,
+      "atomic": false
+    },
+    "n2": {
+      "id": "n2",
+      "depth": 1,
+      "text": "Section B covers the method, its edge cases, caveats, and provenance.",
+      "words": 11,
+      "children": [
+        "n21",
+        "n22",
+        "n23",
+        "n24"
+      ],
+      "parent": "n0",
+      "is_leaf": false,
+      "source_span": [
+        447,
+        1076
+      ],
+      "cites": [
+        "n21",
+        "n221"
+      ],
+      "importance": 0.95,
+      "atomic": false
+    },
+    "n22": {
+      "id": "n22",
+      "depth": 2,
+      "text": "The method is explained plainly, then broken into two edge cases.",
+      "words": 11,
+      "children": [
+        "n221",
+        "n222"
+      ],
+      "parent": "n2",
+      "is_leaf": false,
+      "source_span": [
+        564,
+        878
+      ],
+      "cites": [
+        "n221",
+        "n2221"
+      ],
+      "importance": 0.8,
+      "atomic": false
+    },
+    "n222": {
+      "id": "n222",
+      "depth": 3,
+      "text": "Two edge cases are handled separately because they diverge in behaviour.",
+      "words": 11,
+      "children": [
+        "n2221",
+        "n2222"
+      ],
+      "parent": "n22",
+      "is_leaf": false,
+      "source_span": [
+        680,
+        878
+      ],
+      "cites": [
+        "n2221",
+        "n2222"
+      ],
+      "importance": 0.7,
+      "atomic": false
+    },
+    "n23": {
+      "id": "n23",
+      "depth": 2,
+      "text": "A short branch lists the caveats readers most often raise.",
+      "words": 10,
+      "children": [
+        "n231"
+      ],
+      "parent": "n2",
+      "is_leaf": false,
+      "source_span": [
+        880,
+        982
+      ],
+      "cites": [
+        "n231"
+      ],
+      "importance": 0.4,
+      "atomic": false
+    },
+    "n3": {
+      "id": "n3",
+      "depth": 1,
+      "text": "Section C traces the history, the rejected alternative, and two proposed fixes.",
+      "words": 12,
+      "children": [
+        "n31",
+        "n32",
+        "n33",
+        "n34"
+      ],
+      "parent": "n0",
+      "is_leaf": false,
+      "source_span": [
+        1078,
+        1594
+      ],
+      "cites": [
+        "n31",
+        "n32"
+      ],
+      "importance": 0.8,
+      "atomic": false
+    },
+    "n33": {
+      "id": "n33",
+      "depth": 2,
+      "text": "Two proposed fixes are laid out side by side with their tradeoffs.",
+      "words": 12,
+      "children": [
+        "n331",
+        "n332"
+      ],
+      "parent": "n3",
+      "is_leaf": false,
+      "source_span": [
+        1293,
+        1508
+      ],
+      "cites": [
+        "n331",
+        "n332"
+      ],
+      "importance": 0.9,
+      "atomic": false
+    }
+  },
+  "max_depth": 4,
+  "status": "done",
+  "provisional_root": false
+}
