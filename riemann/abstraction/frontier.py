@@ -73,9 +73,16 @@ def hop_distance(tree: Tree, a: str, b: str) -> int:
     return (tree.nodes[a].depth - lca_depth) + (tree.nodes[b].depth - lca_depth)
 
 
+def _mid(node) -> float:
+    return (node.source_span[0] + node.source_span[1]) / 2
+
+
 def _priority_key(tree: Tree, node_id: str, anchor_id: str):
+    """Nearest to the anchor by document offset (source-span midpoints), then
+    higher importance, then shallower depth, then id. Must match
+    buildExpansionSequence in web/frontier.js exactly."""
     node = tree.nodes[node_id]
-    distance = hop_distance(tree, node_id, anchor_id)
+    distance = abs(_mid(node) - _mid(tree.nodes[anchor_id]))
     return (distance, -node.importance, node.depth, node_id)
 
 

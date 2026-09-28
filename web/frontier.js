@@ -10,8 +10,8 @@
 //   - z in [0,1]: 0 = root gist only, 1 = every leaf (full source).
 //   - "expansion sequence": one precomputed, topologically valid order in
 //     which internal (non-leaf) nodes get expanded, built greedily by
-//     priority: (1) nearest to the anchor node, (2) higher importance,
-//     (3) shallower depth. A node only becomes a candidate once its
+//     priority: (1) nearest to the anchor by document offset (source-span
+//     midpoints), (2) higher importance, (3) shallower depth, (4) id. A node only becomes a candidate once its
 //     parent has already been expanded (or it is the root), which is
 //     what keeps the sequence topologically valid.
 //   - z maps to k = round(z * total_expansions); Frontier(k) = the set of
@@ -61,7 +61,12 @@ function buildExpansionSequence(tree, anchorNodeId) {
         if (a.importance > b.importance) bestIdx = i;
         continue;
       }
-      if (a.depth < b.depth) bestIdx = i;
+      if (a.depth !== b.depth) {
+        if (a.depth < b.depth) bestIdx = i;
+        continue;
+      }
+      // Final tie-break by id, matching riemann/abstraction/frontier.py.
+      if (candidates[i] < candidates[bestIdx]) bestIdx = i;
     }
 
     const id = candidates.splice(bestIdx, 1)[0];

@@ -18,8 +18,11 @@ from riemann.abstraction.chunk import TINY_DOC_WORDS, chunk, word_count
 from riemann.abstraction.model import Node, Tree
 from riemann.abstraction.summarise import Summariser, parse_json_robustly
 
-RATIO = 4
+RATIO = 3  # compression per step; Forte's practitioner funnel suggests 2.5-4x (weak evidence)
 GIST_WORDS = 25
+# A node within the usual length tolerance of the gist budget already *is* the gist;
+# summarising it again only produces a stub level (seen in testing: 26 -> 11 words).
+GIST_STOP_WORDS = round(GIST_WORDS * 1.35)
 MAX_CONCURRENCY = 4
 LEAF_CONTEXT_CHAR_BUDGET = 6000
 LENGTH_TOLERANCE = 0.35
@@ -402,7 +405,7 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
     for _ in range(MAX_BUILD_ROUNDS):
         if len(current_level) == 1:
             only = current_level[0]
-            if word_count(nodes[only].text) <= GIST_WORDS:
+            if word_count(nodes[only].text) <= GIST_STOP_WORDS:
                 final_root_id = only
                 break
             nid, parent = await process_group([only], is_root_call=True, force=True)
@@ -411,7 +414,7 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
             current_level = [nid]
             height += 1
             final_root_id = nid
-            if word_count(nodes[nid].text) <= GIST_WORDS:
+            if word_count(nodes[nid].text) <= GIST_STOP_WORDS:
                 break
             continue
 
@@ -430,7 +433,7 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
         current_level = new_level
         height += 1
 
-        if len(current_level) == 1 and word_count(nodes[current_level[0]].text) <= GIST_WORDS:
+        if len(current_level) == 1 and word_count(nodes[current_level[0]].text) <= GIST_STOP_WORDS:
             final_root_id = current_level[0]
             break
 

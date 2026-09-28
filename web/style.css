@@ -305,8 +305,11 @@ body.minimal-chrome #content {
   max-width: 70ch;
   width: 100%;
   margin: 0 auto;
-  padding: 1.5rem 16px 8rem;
+  /* Generous room above and below so the anchored passage can always be held at
+     the same screen position, even when collapsing makes the text shorter than the viewport. */
+  padding: 1.5rem 16px 55vh;
 }
+#content::before { content: ""; display: block; height: 40vh; }
 
 #content.column-crossfade {
   transition: opacity var(--transition-fast) ease;

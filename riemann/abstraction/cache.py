@@ -20,9 +20,16 @@ def cache_dir() -> Path:
         base = Path(override) / "cache"
     else:
         base = Path(os.environ.get("XDG_CACHE_HOME", "~/.cache")).expanduser() / "riemann"
-    trees_dir = base / "trees"
+    trees_dir = base / "trees" / build_version()
     trees_dir.mkdir(parents=True, exist_ok=True)
     return trees_dir
+
+
+def build_version() -> str:
+    """Cache namespace derived from the build parameters, so changing RATIO,
+    leaf size or gist length never serves a tree built under old settings."""
+    from riemann.abstraction import build, chunk  # lazy: build imports this module
+    return f"r{build.RATIO}-leaf{chunk.MAX_LEAF_WORDS}-gist{build.GIST_WORDS}-stop{build.GIST_STOP_WORDS}"
 
 
 def tree_id_for(text: str) -> str:

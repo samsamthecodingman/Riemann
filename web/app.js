@@ -150,7 +150,7 @@
     const minutes = Math.max(1, Math.round(words / WPM));
     const pct = Math.max(1, Math.round((words / Math.max(1, tree.source_words)) * 100));
     $dialReadout.textContent = `~${minutes} min · ${pct}% of original`;
-    const valuetext = `about ${minutes} minutes, ${pct} percent of original`;
+    const valuetext = `about ${minutes} minute${minutes === 1 ? "" : "s"}, ${pct} percent of original`;
     $dial.setAttribute("aria-valuetext", valuetext);
     $dial.setAttribute("aria-valuenow", String(Math.round(state.z * 100)));
     const fillPct = Math.round(state.z * 100);

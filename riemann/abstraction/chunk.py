@@ -1,6 +1,6 @@
 """Chunk: markdown -> leaves.
 
-Splits on headings, then packs paragraphs into leaves of <= ~350 words.
+Splits on headings, then packs paragraphs into leaves of <= ~120 words.
 Code fences, numbered procedures and $$...$$ display-math blocks become
 their own atomic leaves (never summarised, shown verbatim). A tiny
 document (<= ~60 words) becomes a single leaf.
@@ -12,7 +12,7 @@ import re
 
 from pydantic import BaseModel
 
-MAX_LEAF_WORDS = 350
+MAX_LEAF_WORDS = 120  # roughly paragraph-sized, so the dial unfolds in small steps
 TINY_DOC_WORDS = 60
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
