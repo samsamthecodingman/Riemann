@@ -45,6 +45,8 @@ def check(k, t):
     pairs = [("text", "bg"), ("body", "bg"), ("muted", "bg"), ("label", "bg"), ("label", "panel"), ("text", "panel"), ("body", "panel"),
              ("onAccent", "accent"), ("softText", "soft"), ("deepText", "deep"), ("deepSub", "deep"), ("deepLabel", "deep"),
              ("text", "chip"), ("muted", "panel")]
+    for i, s in enumerate(t.get("sections", [])):
+        t[f"_sec{i}"] = s; pairs.append(("text", f"_sec{i}")); pairs.append(("body", f"_sec{i}"))
     if t.get("mark"): pairs.append(("text", "mark"))
     if t.get("flow"): pairs.append(("text", "flow"))
     bad = [(a, b, round(cr(t[a], t[b]), 2)) for a, b in pairs if cr(t[a], t[b]) < 4.5]
@@ -56,7 +58,16 @@ def board(k, t):
     R, B = t["radius"], t["btn"]
     ui, disp, bod = t["ui"], t["display"], t["body_font"]
     mono_up = "letter-spacing: 0.08em"
-    sec = lambda n, title, cur=False: (
+    secs = t.get("sections")
+    def dot(n):
+        return (f'<span aria-hidden="true" style="width: 10px; height: 10px; margin-top: 6px; flex-shrink: 0; border-radius: 999px; background: {secs[int(n)-1]}; box-shadow: inset 0 0 0 1px {t["border"]}"></span>') if secs else ''
+    if secs:
+        sec = lambda n, title, cur=False: (
+          f'<a href="#" aria-current="true" style="display: flex; gap: 12px; padding: 12px; border-radius: {min(R,12)}px; text-decoration: none; color: {t["text"]}; background: {secs[int(n)-1]}; font-weight: 600"><span style="font-weight: 700">{n}</span><span>{title}</span></a>'
+          if cur else
+          f'<a href="#" style="display: flex; gap: 12px; padding: 12px; border-radius: {min(R,12)}px; text-decoration: none; color: {t["body"]}">{dot(n)}<span style="font-weight: 700; color: {t["label"]}">{n}</span><span>{title}</span></a>')
+    else:
+      sec = lambda n, title, cur=False: (
       f'<a href="#" aria-current="true" style="display: flex; gap: 12px; padding: 12px; border-radius: {min(R,12)}px; text-decoration: none; color: {t["softText"]}; background: {t["soft"]}; box-shadow: inset 3px 0 0 {t.get("accentEdge", t["accent"])}; font-weight: 600"><span style="font-weight: 700; color: {t["softText"]}">{n}</span><span>{title}</span></a>'
       if cur else
       f'<a href="#" style="display: flex; gap: 12px; padding: 12px; border-radius: {min(R,12)}px; text-decoration: none; color: {t["body"]}"><span style="font-weight: 700; color: {t["label"]}">{n}</span><span>{title}</span></a>')
@@ -105,7 +116,7 @@ a{{color:{t["accent"]}}}a:hover{{color:{t["accent"]}}}
 </nav>
 
 <main style="overflow: hidden; padding: 36px 48px 0; display: flex; flex-direction: column; gap: 18px">
-<span style="font-size: 13px; font-weight: 700; letter-spacing: 0.1em; color: {t["label"]}"><span style="color: {t["accent"] if lum(t["bg"])<0.2 else t["softText"]}">03</span> · NAMES &amp; RELIABILITY</span>
+<span style="font-size: 13px; font-weight: 700; letter-spacing: 0.1em; color: {t["label"]}">{(f'<span style="padding: 4px 10px; border-radius: 999px; background: {secs[2]}; color: {t["text"]}">03</span>') if secs else (f'<span style="color: {t["accent"] if lum(t["bg"])<0.2 else t["softText"]}">03</span>')} · NAMES &amp; RELIABILITY</span>
 <h1 style="margin: 0; font-family: '{disp}', serif; font-size: 46px; line-height: 1.1; font-weight: 600; color: {t["text"]}">When a site won't load, suspect DNS</h1>
 <p style="margin: 0; font-size: 19px; line-height: 1.55; color: {t["muted"]}; max-width: 780px">Names become addresses through a hierarchy, and TCP makes delivery reliable on top of an IP layer that promises nothing.</p>
 <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 36px; margin-top: 8px">
