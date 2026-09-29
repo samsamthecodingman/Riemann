@@ -1,302 +1,49 @@
 {
   "id": "fixture0000000",
-  "title": "How Continuous Zoom Reading Works (fixture)",
-  "source_text": "The dial's leftmost setting shows nothing but the root gist: a single claim standing in for the whole source.\n\nAt full expansion this branch reveals the fine print behind section A, including the exact wording the summary compressed.\n\nSection A also has a short aside that never needed a summary of its own, since it was already brief.\n\nA second short aside sits beside the first, covering a related point that the build step chose not to merge.\n\nSection B opens with a leaf that stayed a leaf because summarising it further would have lost the specific numbers.\n\nUnderneath section B's second child is a leaf describing the method in plain terms, short enough to read directly.\n\nDeep inside section B is a leaf holding the first of two edge cases the method has to handle.\n\nRight beside it is the second edge case, which behaves differently enough to deserve its own paragraph.\n\nSection B's third child bottoms out in a single leaf that lists the caveats readers usually ask about.\n\nSection B closes with a leaf summarising who reviewed the work and when it was last revised.\n\nSection C begins with a leaf about the historical context that motivated the whole document in the first place.\n\nA second leaf in section C lays out the competing view that the authors ultimately rejected and why.\n\nSection C's third branch splits into a leaf describing the first proposed fix in careful, testable language.\n\nBeside it sits the second proposed fix, framed as an alternative with different tradeoffs worth weighing.\n\n```\ndef apply_fix(x):\n    # atomic code block, never summarised\n    return x * 2\n```",
-  "source_words": 272,
+  "title": "How the Internet Actually Moves Your Data",
+  "source_text": "Large networks meet physically at internet exchange points, buildings full of routers where they plug into each other and agree to swap traffic. This peering is usually settlement-free between networks of similar size, because both sides gain roughly equal value from the exchange.\n\nSmaller networks that can't peer with everyone instead pay a larger provider for transit: the right to reach the whole internet through that provider's connections. Transit contracts, not any single map, are what actually stitches the mesh together end to end.\n\nYour data is broken into small packets before it leaves your device, each carrying its own address and a piece of the whole message. Routers along the way forward each packet independently, so packets from the same page load can take different paths and still arrive in the right order once reassembled.\n\nLatency is the time a single packet takes to travel from sender to receiver, driven mostly by physical distance and the number of hops in between. Even at the speed of light, a round trip across an ocean adds tens of milliseconds that no amount of bandwidth can remove.\n\nJitter is the variation in that delay from one packet to the next, usually caused by routers queuing packets differently as network load shifts. A video call can tolerate steady latency far better than it tolerates jitter, because jitter is what actually causes stutter and dropped frames.\n\nWhen a router's outgoing queue fills up, it starts discarding packets rather than letting the queue grow without bound, a deliberate design choice called active queue management. For real-time video, a dropped packet often matters less than a late one, since a frame that arrives too late is thrown away anyway.\n\nNobody wants to type a string of numbers to visit a website, so the internet layers a naming system, the Domain Name System or DNS, on top of raw IP addresses. When you type a domain name into a browser, your computer asks a DNS resolver to translate that name into an IP address before any connection can be made. This lookup is usually invisible and fast, cached at several levels, but it is also a common point of failure: if DNS is broken or blocked, a website can be completely unreachable even though the server hosting it is running fine.\n\nDNS is organized as a hierarchy. At the top are root servers that know which servers are authoritative for each top-level domain, such as .com or .org. Those servers in turn know which servers are authoritative for individual domains, and so on down to the specific record for a given subdomain. This structure means no single server needs to store the whole internet's worth of names, and it is part of why the naming system has scaled from a few hundred hosts in the 1980s to billions of names today.\n\nUDP sends packets without any handshake, acknowledgement or guaranteed order, and simply drops anything that doesn't arrive in time. There is no connection to set up and nothing to retransmit, so a UDP packet either arrives quickly or is simply gone.\n\nLive video and voice calls prefer this trade: a late frame is useless anyway, so retransmitting it would only make the stutter worse, not better. Dropping it and moving on keeps the call feeling live instead of feeling behind.\n\nBefore any data moves, TCP performs a three-way handshake: the client proposes a starting sequence number, the server acknowledges it and proposes its own, and the client acknowledges that in turn. Only after this handshake do the two sides start exchanging the actual data, each packet numbered so missing or out-of-order packets can be detected and fixed.\n\nTLS runs a second handshake on top of TCP's: the server presents a certificate, the browser checks it against a chain of trust, and the two sides agree on a shared key used to encrypt everything that follows. Without this step, a network in the middle could silently read or alter every request, which is why plain HTTP is considered unsafe for anything sensitive.\n\nBefore blaming the network, check whether the domain resolves at all: a failed or wrong DNS answer looks identical to a dead server from the browser's point of view, but the fix is completely different. Tools like dig or nslookup answer this in seconds and rule out an entire category of problems.\n\nA ping confirms whether the destination is reachable at all and roughly how long a round trip takes. It says almost nothing about why a connection is slow, only whether the most basic form of contact succeeds.\n\nA traceroute goes further, showing every router hop along the way, so a connection that dies at the same hop every time usually points at that specific network, not your own. It turns a vague “it doesn't work” into a specific hop to investigate.\n\nSome connections look fine at idle and only drop packets once real traffic load hits a congested link, so a one-off ping is not enough to rule out this kind of failure. Sustained tests, or simply watching a call degrade under load, catch the failures that a single quiet ping misses.",
+  "source_words": 859,
   "root": "n0",
   "nodes": {
     "n111": {
       "id": "n111",
       "depth": 3,
-      "text": "The dial's leftmost setting shows nothing but the root gist: a single claim standing in for the whole source.",
-      "words": 19,
+      "text": "Large networks meet physically at internet exchange points, buildings full of routers where they plug into each other and agree to swap traffic. This peering is usually settlement-free between networks of similar size, because both sides gain roughly equal value from the exchange.",
+      "words": 43,
       "children": [],
       "parent": "n11",
       "is_leaf": true,
       "source_span": [
         0,
-        109
+        281
       ],
       "cites": [],
       "importance": 0.5,
-      "atomic": false
+      "atomic": false,
+      "title": "Peering at internet exchange points"
     },
-    "n1121": {
-      "id": "n1121",
-      "depth": 4,
-      "text": "At full expansion this branch reveals the fine print behind section A, including the exact wording the summary compressed.",
-      "words": 19,
-      "children": [],
-      "parent": "n112",
-      "is_leaf": true,
-      "source_span": [
-        111,
-        233
-      ],
-      "cites": [],
-      "importance": 0.5,
-      "atomic": false
-    },
-    "n12": {
-      "id": "n12",
-      "depth": 2,
-      "text": "Section A also has a short aside that never needed a summary of its own, since it was already brief.",
-      "words": 20,
-      "children": [],
-      "parent": "n1",
-      "is_leaf": true,
-      "source_span": [
-        235,
-        335
-      ],
-      "cites": [],
-      "importance": 0.5,
-      "atomic": false
-    },
-    "n13": {
-      "id": "n13",
-      "depth": 2,
-      "text": "A second short aside sits beside the first, covering a related point that the build step chose not to merge.",
-      "words": 20,
-      "children": [],
-      "parent": "n1",
-      "is_leaf": true,
-      "source_span": [
-        337,
-        445
-      ],
-      "cites": [],
-      "importance": 0.5,
-      "atomic": false
-    },
-    "n21": {
-      "id": "n21",
-      "depth": 2,
-      "text": "Section B opens with a leaf that stayed a leaf because summarising it further would have lost the specific numbers.",
-      "words": 20,
-      "children": [],
-      "parent": "n2",
-      "is_leaf": true,
-      "source_span": [
-        447,
-        562
-      ],
-      "cites": [],
-      "importance": 0.5,
-      "atomic": false
-    },
-    "n221": {
-      "id": "n221",
+    "n112": {
+      "id": "n112",
       "depth": 3,
-      "text": "Underneath section B's second child is a leaf describing the method in plain terms, short enough to read directly.",
-      "words": 19,
+      "text": "Smaller networks that can't peer with everyone instead pay a larger provider for transit: the right to reach the whole internet through that provider's connections. Transit contracts, not any single map, are what actually stitches the mesh together end to end.",
+      "words": 41,
       "children": [],
-      "parent": "n22",
+      "parent": "n11",
       "is_leaf": true,
       "source_span": [
-        564,
-        678
+        283,
+        543
       ],
       "cites": [],
       "importance": 0.5,
-      "atomic": false
-    },
-    "n2221": {
-      "id": "n2221",
-      "depth": 4,
-      "text": "Deep inside section B is a leaf holding the first of two edge cases the method has to handle.",
-      "words": 19,
-      "children": [],
-      "parent": "n222",
-      "is_leaf": true,
-      "source_span": [
-        680,
-        773
-      ],
-      "cites": [],
-      "importance": 0.5,
-      "atomic": false
-    },
-    "n2222": {
-      "id": "n2222",
-      "depth": 4,
-      "text": "Right beside it is the second edge case, which behaves differently enough to deserve its own paragraph.",
-      "words": 17,
-      "children": [],
-      "parent": "n222",
-      "is_leaf": true,
-      "source_span": [
-        775,
-        878
-      ],
-      "cites": [],
-      "importance": 0.5,
-      "atomic": false
-    },
-    "n231": {
-      "id": "n231",
-      "depth": 3,
-      "text": "Section B's third child bottoms out in a single leaf that lists the caveats readers usually ask about.",
-      "words": 18,
-      "children": [],
-      "parent": "n23",
-      "is_leaf": true,
-      "source_span": [
-        880,
-        982
-      ],
-      "cites": [],
-      "importance": 0.5,
-      "atomic": false
-    },
-    "n24": {
-      "id": "n24",
-      "depth": 2,
-      "text": "Section B closes with a leaf summarising who reviewed the work and when it was last revised.",
-      "words": 17,
-      "children": [],
-      "parent": "n2",
-      "is_leaf": true,
-      "source_span": [
-        984,
-        1076
-      ],
-      "cites": [],
-      "importance": 0.5,
-      "atomic": false
-    },
-    "n31": {
-      "id": "n31",
-      "depth": 2,
-      "text": "Section C begins with a leaf about the historical context that motivated the whole document in the first place.",
-      "words": 19,
-      "children": [],
-      "parent": "n3",
-      "is_leaf": true,
-      "source_span": [
-        1078,
-        1189
-      ],
-      "cites": [],
-      "importance": 0.5,
-      "atomic": false
-    },
-    "n32": {
-      "id": "n32",
-      "depth": 2,
-      "text": "A second leaf in section C lays out the competing view that the authors ultimately rejected and why.",
-      "words": 18,
-      "children": [],
-      "parent": "n3",
-      "is_leaf": true,
-      "source_span": [
-        1191,
-        1291
-      ],
-      "cites": [],
-      "importance": 0.5,
-      "atomic": false
-    },
-    "n331": {
-      "id": "n331",
-      "depth": 3,
-      "text": "Section C's third branch splits into a leaf describing the first proposed fix in careful, testable language.",
-      "words": 17,
-      "children": [],
-      "parent": "n33",
-      "is_leaf": true,
-      "source_span": [
-        1293,
-        1401
-      ],
-      "cites": [],
-      "importance": 0.5,
-      "atomic": false
-    },
-    "n332": {
-      "id": "n332",
-      "depth": 3,
-      "text": "Beside it sits the second proposed fix, framed as an alternative with different tradeoffs worth weighing.",
-      "words": 16,
-      "children": [],
-      "parent": "n33",
-      "is_leaf": true,
-      "source_span": [
-        1403,
-        1508
-      ],
-      "cites": [],
-      "importance": 0.5,
-      "atomic": false
-    },
-    "n34": {
-      "id": "n34",
-      "depth": 2,
-      "text": "```\ndef apply_fix(x):\n    # atomic code block, never summarised\n    return x * 2\n```",
-      "words": 14,
-      "children": [],
-      "parent": "n3",
-      "is_leaf": true,
-      "source_span": [
-        1510,
-        1594
-      ],
-      "cites": [],
-      "importance": 0.5,
-      "atomic": true
-    },
-    "n0": {
-      "id": "n0",
-      "depth": 0,
-      "text": "The document argues for a layered, zoomable way of reading long material.",
-      "words": 12,
-      "children": [
-        "n1",
-        "n2",
-        "n3"
-      ],
-      "parent": null,
-      "is_leaf": false,
-      "source_span": [
-        0,
-        1594
-      ],
-      "cites": [
-        "n111",
-        "n1121",
-        "n12"
-      ],
-      "importance": 1.0,
-      "atomic": false
-    },
-    "n1": {
-      "id": "n1",
-      "depth": 1,
-      "text": "Section A introduces the core idea and two short supporting asides.",
-      "words": 11,
-      "children": [
-        "n11",
-        "n12",
-        "n13"
-      ],
-      "parent": "n0",
-      "is_leaf": false,
-      "source_span": [
-        0,
-        445
-      ],
-      "cites": [
-        "n111",
-        "n1121"
-      ],
-      "importance": 0.9,
-      "atomic": false
+      "atomic": false,
+      "title": "Transit: paying to reach the rest"
     },
     "n11": {
       "id": "n11",
       "depth": 2,
-      "text": "The core idea splits into a plain-language leaf and a deeper technical branch.",
-      "words": 13,
+      "text": "Internet service providers and backbone carriers exchange traffic under private agreements at exchange points, forming a mesh with no central operator.",
+      "words": 21,
       "children": [
         "n111",
         "n112"
@@ -305,171 +52,542 @@
       "is_leaf": false,
       "source_span": [
         0,
-        233
+        543
       ],
       "cites": [
         "n111",
-        "n1121"
+        "n112"
       ],
       "importance": 0.7,
-      "atomic": false
+      "atomic": false,
+      "title": "Who owns the wires"
     },
-    "n112": {
-      "id": "n112",
-      "depth": 3,
-      "text": "The technical branch expands once more into the full fine print.",
-      "words": 11,
-      "children": [
-        "n1121"
-      ],
-      "parent": "n11",
-      "is_leaf": false,
+    "n12": {
+      "id": "n12",
+      "depth": 2,
+      "text": "Your data is broken into small packets before it leaves your device, each carrying its own address and a piece of the whole message. Routers along the way forward each packet independently, so packets from the same page load can take different paths and still arrive in the right order once reassembled.",
+      "words": 52,
+      "children": [],
+      "parent": "n1",
+      "is_leaf": true,
       "source_span": [
-        111,
-        233
+        545,
+        848
       ],
-      "cites": [
-        "n1121"
-      ],
-      "importance": 0.6,
-      "atomic": false
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false,
+      "title": "Packets, not a continuous stream"
     },
-    "n2": {
-      "id": "n2",
+    "n1": {
+      "id": "n1",
       "depth": 1,
-      "text": "Section B covers the method, its edge cases, caveats, and provenance.",
-      "words": 11,
+      "text": "The internet is a mesh of independently owned networks that pass packets to each other, not a single wire owned by anyone.",
+      "words": 22,
       "children": [
-        "n21",
-        "n22",
-        "n23",
-        "n24"
+        "n11",
+        "n12"
       ],
       "parent": "n0",
       "is_leaf": false,
       "source_span": [
-        447,
-        1076
+        0,
+        848
       ],
       "cites": [
-        "n21",
-        "n221"
+        "n111",
+        "n112",
+        "n12"
       ],
-      "importance": 0.95,
-      "atomic": false
+      "importance": 0.9,
+      "atomic": false,
+      "title": "Not one pipe, but a mesh",
+      "hook": "Data doesn't travel one wire; it hops across networks owned by thousands of separate companies.",
+      "key_points": [
+        "Traffic is split into small packets routed independently",
+        "Independently owned networks interconnect at exchange points",
+        "No single company operates “the internet”"
+      ]
+    },
+    "n211": {
+      "id": "n211",
+      "depth": 3,
+      "text": "Latency is the time a single packet takes to travel from sender to receiver, driven mostly by physical distance and the number of hops in between. Even at the speed of light, a round trip across an ocean adds tens of milliseconds that no amount of bandwidth can remove.",
+      "words": 49,
+      "children": [],
+      "parent": "n21",
+      "is_leaf": true,
+      "source_span": [
+        850,
+        1119
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false,
+      "title": "Latency: the one-way delay"
+    },
+    "n212": {
+      "id": "n212",
+      "depth": 3,
+      "text": "Jitter is the variation in that delay from one packet to the next, usually caused by routers queuing packets differently as network load shifts. A video call can tolerate steady latency far better than it tolerates jitter, because jitter is what actually causes stutter and dropped frames.",
+      "words": 47,
+      "children": [],
+      "parent": "n21",
+      "is_leaf": true,
+      "source_span": [
+        1121,
+        1410
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false,
+      "title": "Jitter: delay that keeps changing"
+    },
+    "n21": {
+      "id": "n21",
+      "depth": 2,
+      "text": "Latency is how long a single packet takes to arrive; jitter is how much that time varies between one packet and the next, and video calls need both to be small.",
+      "words": 31,
+      "children": [
+        "n211",
+        "n212"
+      ],
+      "parent": "n2",
+      "is_leaf": false,
+      "source_span": [
+        850,
+        1410
+      ],
+      "cites": [
+        "n211",
+        "n212"
+      ],
+      "importance": 0.7,
+      "atomic": false,
+      "title": "Latency and jitter, not the same thing"
     },
     "n22": {
       "id": "n22",
       "depth": 2,
-      "text": "The method is explained plainly, then broken into two edge cases.",
-      "words": 11,
-      "children": [
-        "n221",
-        "n222"
-      ],
+      "text": "When a router's outgoing queue fills up, it starts discarding packets rather than letting the queue grow without bound, a deliberate design choice called active queue management. For real-time video, a dropped packet often matters less than a late one, since a frame that arrives too late is thrown away anyway.",
+      "words": 51,
+      "children": [],
       "parent": "n2",
-      "is_leaf": false,
+      "is_leaf": true,
       "source_span": [
-        564,
-        878
+        1412,
+        1723
       ],
-      "cites": [
-        "n221",
-        "n2221"
-      ],
-      "importance": 0.8,
-      "atomic": false
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false,
+      "title": "Congestion drops packets before it delays them"
     },
-    "n222": {
-      "id": "n222",
-      "depth": 3,
-      "text": "Two edge cases are handled separately because they diverge in behaviour.",
-      "words": 11,
-      "children": [
-        "n2221",
-        "n2222"
-      ],
-      "parent": "n22",
-      "is_leaf": false,
-      "source_span": [
-        680,
-        878
-      ],
-      "cites": [
-        "n2221",
-        "n2222"
-      ],
-      "importance": 0.7,
-      "atomic": false
-    },
-    "n23": {
-      "id": "n23",
-      "depth": 2,
-      "text": "A short branch lists the caveats readers most often raise.",
-      "words": 10,
-      "children": [
-        "n231"
-      ],
-      "parent": "n2",
-      "is_leaf": false,
-      "source_span": [
-        880,
-        982
-      ],
-      "cites": [
-        "n231"
-      ],
-      "importance": 0.4,
-      "atomic": false
-    },
-    "n3": {
-      "id": "n3",
+    "n2": {
+      "id": "n2",
       "depth": 1,
-      "text": "Section C traces the history, the rejected alternative, and two proposed fixes.",
-      "words": 12,
+      "text": "Latency, jitter and packet loss compound under load, and video calls suffer first because they can't wait for retransmitted data.",
+      "words": 20,
       "children": [
-        "n31",
-        "n32",
-        "n33",
-        "n34"
+        "n21",
+        "n22"
       ],
       "parent": "n0",
       "is_leaf": false,
       "source_span": [
-        1078,
-        1594
+        850,
+        1723
+      ],
+      "cites": [
+        "n211",
+        "n212",
+        "n22"
+      ],
+      "importance": 0.95,
+      "atomic": false,
+      "title": "Why your video call stutters",
+      "hook": "Small delays compound because routers queue, drop and reorder packets when a link is busy.",
+      "key_points": [
+        "Latency is the one-way delay a packet takes to arrive",
+        "Jitter is delay that varies from packet to packet",
+        "Congested routers queue or drop packets under load"
+      ]
+    },
+    "n31": {
+      "id": "n31",
+      "depth": 2,
+      "text": "Nobody wants to type a string of numbers to visit a website, so the internet layers a naming system, the Domain Name System or DNS, on top of raw IP addresses. When you type a domain name into a browser, your computer asks a DNS resolver to translate that name into an IP address before any connection can be made. This lookup is usually invisible and fast, cached at several levels, but it is also a common point of failure: if DNS is broken or blocked, a website can be completely unreachable even though the server hosting it is running fine.",
+      "words": 101,
+      "children": [],
+      "parent": "n3",
+      "is_leaf": true,
+      "source_span": [
+        1725,
+        2270
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false,
+      "title": "Names → numbers"
+    },
+    "n32": {
+      "id": "n32",
+      "depth": 2,
+      "text": "DNS is organized as a hierarchy. At the top are root servers that know which servers are authoritative for each top-level domain, such as .com or .org. Those servers in turn know which servers are authoritative for individual domains, and so on down to the specific record for a given subdomain. This structure means no single server needs to store the whole internet's worth of names, and it is part of why the naming system has scaled from a few hundred hosts in the 1980s to billions of names today.",
+      "words": 90,
+      "children": [],
+      "parent": "n3",
+      "is_leaf": true,
+      "source_span": [
+        2272,
+        2774
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false,
+      "title": "A hierarchy, so no server stores everything"
+    },
+    "n3": {
+      "id": "n3",
+      "depth": 1,
+      "text": "Names become addresses through a hierarchy, and TCP makes delivery reliable on top of an IP layer that promises nothing.",
+      "words": 20,
+      "children": [
+        "n31",
+        "n32"
+      ],
+      "parent": "n0",
+      "is_leaf": false,
+      "source_span": [
+        1725,
+        2774
       ],
       "cites": [
         "n31",
         "n32"
       ],
-      "importance": 0.8,
-      "atomic": false
+      "importance": 0.85,
+      "atomic": false,
+      "title": "When a site won't load, suspect DNS",
+      "hook": "Names become addresses through a hierarchy, and TCP makes delivery reliable on top of an IP layer that promises nothing.",
+      "key_fact": {
+        "big": "Hundreds → billions",
+        "detail": "DNS grew from a few hundred hosts in the 1980s to billions of names today.",
+        "cites": [
+          "n32"
+        ]
+      }
     },
-    "n33": {
-      "id": "n33",
-      "depth": 2,
-      "text": "Two proposed fixes are laid out side by side with their tradeoffs.",
-      "words": 12,
-      "children": [
-        "n331",
-        "n332"
+    "n411": {
+      "id": "n411",
+      "depth": 3,
+      "text": "UDP sends packets without any handshake, acknowledgement or guaranteed order, and simply drops anything that doesn't arrive in time. There is no connection to set up and nothing to retransmit, so a UDP packet either arrives quickly or is simply gone.",
+      "words": 41,
+      "children": [],
+      "parent": "n41",
+      "is_leaf": true,
+      "source_span": [
+        2776,
+        3026
       ],
-      "parent": "n3",
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false,
+      "title": "No handshake, no waiting"
+    },
+    "n412": {
+      "id": "n412",
+      "depth": 3,
+      "text": "Live video and voice calls prefer this trade: a late frame is useless anyway, so retransmitting it would only make the stutter worse, not better. Dropping it and moving on keeps the call feeling live instead of feeling behind.",
+      "words": 39,
+      "children": [],
+      "parent": "n41",
+      "is_leaf": true,
+      "source_span": [
+        3028,
+        3254
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false,
+      "title": "Why live video prefers to lose packets"
+    },
+    "n41": {
+      "id": "n41",
+      "depth": 2,
+      "text": "UDP sends packets without any handshake, acknowledgement or guaranteed order, and simply drops anything that doesn't arrive in time.",
+      "words": 19,
+      "children": [
+        "n411",
+        "n412"
+      ],
+      "parent": "n4",
       "is_leaf": false,
       "source_span": [
-        1293,
-        1508
+        2776,
+        3254
       ],
       "cites": [
-        "n331",
-        "n332"
+        "n411",
+        "n412"
       ],
-      "importance": 0.9,
-      "atomic": false
+      "importance": 0.6,
+      "atomic": false,
+      "title": "UDP: fire and forget, on purpose"
+    },
+    "n421": {
+      "id": "n421",
+      "depth": 3,
+      "text": "Before any data moves, TCP performs a three-way handshake: the client proposes a starting sequence number, the server acknowledges it and proposes its own, and the client acknowledges that in turn. Only after this handshake do the two sides start exchanging the actual data, each packet numbered so missing or out-of-order packets can be detected and fixed.",
+      "words": 57,
+      "children": [],
+      "parent": "n42",
+      "is_leaf": true,
+      "source_span": [
+        3256,
+        3613
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false,
+      "title": "The TCP handshake"
+    },
+    "n422": {
+      "id": "n422",
+      "depth": 3,
+      "text": "TLS runs a second handshake on top of TCP's: the server presents a certificate, the browser checks it against a chain of trust, and the two sides agree on a shared key used to encrypt everything that follows. Without this step, a network in the middle could silently read or alter every request, which is why plain HTTP is considered unsafe for anything sensitive.",
+      "words": 64,
+      "children": [],
+      "parent": "n42",
+      "is_leaf": true,
+      "source_span": [
+        3615,
+        3979
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false,
+      "title": "TLS: proving who you're actually talking to"
+    },
+    "n42": {
+      "id": "n42",
+      "depth": 2,
+      "text": "TCP adds the handshake, ordering and retransmission that UDP skips, and TLS layers encryption and identity checks on top of that reliable connection.",
+      "words": 23,
+      "children": [
+        "n421",
+        "n422"
+      ],
+      "parent": "n4",
+      "is_leaf": false,
+      "source_span": [
+        3256,
+        3979
+      ],
+      "cites": [
+        "n421",
+        "n422"
+      ],
+      "importance": 0.65,
+      "atomic": false,
+      "title": "TCP and TLS: reliable, then private"
+    },
+    "n4": {
+      "id": "n4",
+      "depth": 1,
+      "text": "UDP drops late packets instead of waiting; TLS encrypts and verifies who you're talking to on top of TCP's reliable delivery.",
+      "words": 21,
+      "children": [
+        "n41",
+        "n42"
+      ],
+      "parent": "n0",
+      "is_leaf": false,
+      "source_span": [
+        2776,
+        3979
+      ],
+      "cites": [
+        "n411",
+        "n412",
+        "n421",
+        "n422"
+      ],
+      "importance": 0.8,
+      "atomic": false,
+      "title": "Speed vs. certainty",
+      "hook": "UDP drops late packets instead of waiting; TLS encrypts and verifies who you're talking to.",
+      "key_points": [
+        "TCP trades speed for guaranteed, ordered delivery",
+        "TLS adds encryption and identity checks on top of TCP",
+        "UDP skips both when timeliness matters more than completeness"
+      ]
+    },
+    "n51": {
+      "id": "n51",
+      "depth": 2,
+      "text": "Before blaming the network, check whether the domain resolves at all: a failed or wrong DNS answer looks identical to a dead server from the browser's point of view, but the fix is completely different. Tools like dig or nslookup answer this in seconds and rule out an entire category of problems.",
+      "words": 52,
+      "children": [],
+      "parent": "n5",
+      "is_leaf": true,
+      "source_span": [
+        3981,
+        4278
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false,
+      "title": "Start with resolution, not the network"
+    },
+    "n521": {
+      "id": "n521",
+      "depth": 3,
+      "text": "A ping confirms whether the destination is reachable at all and roughly how long a round trip takes. It says almost nothing about why a connection is slow, only whether the most basic form of contact succeeds.",
+      "words": 37,
+      "children": [],
+      "parent": "n52",
+      "is_leaf": true,
+      "source_span": [
+        4280,
+        4489
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false,
+      "title": "Ping: is anything there at all"
+    },
+    "n522": {
+      "id": "n522",
+      "depth": 3,
+      "text": "A traceroute goes further, showing every router hop along the way, so a connection that dies at the same hop every time usually points at that specific network, not your own. It turns a vague “it doesn't work” into a specific hop to investigate.",
+      "words": 44,
+      "children": [],
+      "parent": "n52",
+      "is_leaf": true,
+      "source_span": [
+        4491,
+        4736
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false,
+      "title": "Traceroute: where it actually stops"
+    },
+    "n52": {
+      "id": "n52",
+      "depth": 2,
+      "text": "A ping confirms reachability and round-trip time; a traceroute goes further and shows every router hop along the way.",
+      "words": 19,
+      "children": [
+        "n521",
+        "n522"
+      ],
+      "parent": "n5",
+      "is_leaf": false,
+      "source_span": [
+        4280,
+        4736
+      ],
+      "cites": [
+        "n521",
+        "n522"
+      ],
+      "importance": 0.55,
+      "atomic": false,
+      "title": "Ping and traceroute narrow the blame"
+    },
+    "n53": {
+      "id": "n53",
+      "depth": 2,
+      "text": "Some connections look fine at idle and only drop packets once real traffic load hits a congested link, so a one-off ping is not enough to rule out this kind of failure. Sustained tests, or simply watching a call degrade under load, catch the failures that a single quiet ping misses.",
+      "words": 51,
+      "children": [],
+      "parent": "n5",
+      "is_leaf": true,
+      "source_span": [
+        4738,
+        5021
+      ],
+      "cites": [],
+      "importance": 0.5,
+      "atomic": false,
+      "title": "Loss under load, not loss at rest"
+    },
+    "n5": {
+      "id": "n5",
+      "depth": 1,
+      "text": "A short, ordered set of checks, resolution, reachability, routing, and loss, usually isolates which layer of the stack has failed.",
+      "words": 20,
+      "children": [
+        "n51",
+        "n52",
+        "n53"
+      ],
+      "parent": "n0",
+      "is_leaf": false,
+      "source_span": [
+        3981,
+        5021
+      ],
+      "cites": [
+        "n51",
+        "n521",
+        "n522",
+        "n53"
+      ],
+      "importance": 0.75,
+      "atomic": false,
+      "title": "Diagnose it yourself",
+      "hook": "Work down the stack: resolution, reachability, routing, then loss, and the failing layer usually reveals itself.",
+      "steps": [
+        "Check whether the name resolves at all",
+        "Ping the address to test basic reachability",
+        "Traceroute to see where packets stop",
+        "Try a different DNS resolver",
+        "Watch for loss under sustained load"
+      ]
+    },
+    "n0": {
+      "id": "n0",
+      "depth": 0,
+      "text": "Data crosses the internet as independently routed packets, resolved by name through DNS, and made reliable by TCP or intentionally left unreliable by UDP.",
+      "words": 24,
+      "children": [
+        "n1",
+        "n2",
+        "n3",
+        "n4",
+        "n5"
+      ],
+      "parent": null,
+      "is_leaf": false,
+      "source_span": [
+        0,
+        5021
+      ],
+      "cites": [
+        "n111",
+        "n112",
+        "n12",
+        "n211",
+        "n212",
+        "n22"
+      ],
+      "importance": 1.0,
+      "atomic": false,
+      "title": "What really happens when a page loads",
+      "hook": "Turn “the internet is broken” into a specific, answerable question."
     }
   },
-  "max_depth": 4,
+  "max_depth": 3,
   "status": "done",
-  "provisional_root": false
+  "provisional_root": false,
+  "sections": [
+    "n1",
+    "n2",
+    "n3",
+    "n4",
+    "n5"
+  ]
 }

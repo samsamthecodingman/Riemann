@@ -4,6 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Riemann</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Work+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
@@ -47,21 +49,19 @@
 </main>
 
 <div id="app">
-  <header id="root-header">
-    <div class="header-row">
-      <button id="home-btn" title="Home (z = 0)" aria-label="Home">&#8962;</button>
-      <div id="root-gist"></div>
+  <header id="app-header">
+    <button id="home-btn" title="Home (z = 0)" aria-label="Home">&#8962;</button>
+    <div id="title-block">
+      <span id="doc-title"></span>
+      <span id="doc-hook"></span>
     </div>
-    <nav id="breadcrumb" aria-label="Breadcrumb"></nav>
-  </header>
-
-  <div id="top-spacer" aria-hidden="true"></div>
-  <div id="content" role="feed" aria-label="Document content"></div>
-
-  <div id="source-popover" role="tooltip"></div>
-
-  <footer id="dial-bar">
-    <div class="dial-row">
+    <div class="header-spacer"></div>
+    <button id="palette-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-pressed="false">
+      <span class="mini-dots" aria-hidden="true"><span id="mini-dot-0"></span><span id="mini-dot-1"></span><span id="mini-dot-2"></span></span>
+      Palette
+    </button>
+    <div class="zoom-pill">
+      <button id="zoom-less" type="button" aria-label="Less detail">&minus; Less</button>
       <div
         id="dial"
         role="slider"
@@ -71,9 +71,54 @@
         aria-valuemax="100"
         aria-valuenow="0"
       ></div>
-      <div id="dial-readout" title="Drag up or down for fine control"></div>
-      <button id="not-helpful">not helpful</button>
+      <button id="zoom-more" type="button" aria-label="More detail">More +</button>
     </div>
+  </header>
+
+  <nav id="section-nav" aria-label="Sections">
+    <span class="nav-label">SECTIONS</span>
+    <div id="nav-items"></div>
+    <div class="nav-spacer"></div>
+    <p class="nav-hint">Hold <strong>Z</strong> and move the mouse over any passage to open it up or fold it away.</p>
+  </nav>
+
+  <div id="top-spacer" aria-hidden="true"></div>
+  <div id="content" role="feed" aria-label="Document content"></div>
+
+  <aside id="rail" aria-label="Section details"></aside>
+
+  <div id="source-popover" role="tooltip"></div>
+
+  <div id="highlight-toolbar" role="toolbar" aria-label="Highlight colour" hidden></div>
+
+  <div id="palette-panel" aria-label="Palette" hidden>
+    <div class="palette-head">
+      <h2>Your palette</h2>
+      <button id="palette-close" type="button" aria-label="Close palette">&#10005;</button>
+    </div>
+    <div class="palette-section">
+      <span class="palette-heading">PRESETS</span>
+      <div id="palette-presets" class="palette-preset-grid"></div>
+    </div>
+    <div class="palette-section">
+      <span class="palette-heading">SECTION COLOURS &middot; PICK A SLOT, THEN A COLOUR</span>
+      <div id="palette-slots" class="palette-slots"></div>
+    </div>
+    <div class="palette-section">
+      <span id="palette-swatch-heading" class="palette-heading">PASTELS</span>
+      <div id="palette-swatches" class="palette-swatch-grid"></div>
+      <div class="palette-mode-row">
+        <button id="mode-highlight" type="button" class="mode-btn">
+          <span class="mode-dot" id="mode-hl-dot" aria-hidden="true"></span>Highlighter colour
+        </button>
+        <button id="mode-sections" type="button" class="mode-btn">Section colour</button>
+      </div>
+    </div>
+    <p class="palette-note">To add a highlight, select any text and choose a colour from the little toolbar. Click an existing highlight to recolour or remove it.</p>
+  </div>
+
+  <footer id="dial-bar">
+    <button id="not-helpful">not helpful</button>
   </footer>
 
   <div id="zoom-hint" hidden>

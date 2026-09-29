@@ -1,6 +1,7 @@
-// app.js — Riemann v1 frontend. Vanilla JS, no build step.
-// Reads docs/v1-build-spec.md as the contract. The zoom algorithm itself
-// lives in frontier.js; this file is chrome, rendering, events and state.
+// app.js — Riemann v2 frontend: Macaron Command Centre.
+// Reads docs/v2-macaron-spec.md as the contract. The zoom algorithm itself
+// lives in frontier.js and is untouched here; this file is chrome,
+// rendering (sections/rail/nav), palette, highlights, events and state.
 
 (function () {
   "use strict";
@@ -8,6 +9,24 @@
   const WPM = 238;
   const REDUCED_MOTION = window.matchMedia("(prefers-motion-reduce), (prefers-reduced-motion: reduce)").matches;
   const IS_FIXTURE = new URLSearchParams(location.search).get("fixture") === "1";
+
+  // ---------------------------------------------------------------------
+  // Palette constants (design/Macaron-Palette.dc.html, design/softpastel-tokens.json)
+  // ---------------------------------------------------------------------
+  const PALETTE = [
+    ["Blush", "#F6D5D1"], ["Pastel pink", "#F9D3E3"], ["Rose quartz", "#F3C6D3"], ["Candy floss", "#FBDDEB"],
+    ["Peach", "#FBDCC8"], ["Apricot", "#F8E0B8"], ["Butter", "#F7E8B5"], ["Lemon", "#F5F0B8"],
+    ["Pistachio", "#E1ECCB"], ["Sage", "#D5E6CF"], ["Mint", "#D2EBDD"], ["Seafoam", "#CFE8E1"],
+    ["Sky", "#D3E4F2"], ["Periwinkle", "#D9DDF4"], ["Lavender", "#E2D8F0"], ["Lilac", "#EBD9F0"],
+  ];
+  const PRESETS = [
+    { name: "Macaron", sections: ["#F6D5D1", "#D5E6CF", "#F7E8B5", "#D3E4F2", "#E2D8F0"], hl: "#F9D3E3" },
+    { name: "Pink party", sections: ["#F9D3E3", "#F3C6D3", "#FBDDEB", "#F6D5D1", "#EBD9F0"], hl: "#F9D3E3" },
+    { name: "Garden", sections: ["#E1ECCB", "#D5E6CF", "#F5F0B8", "#FBDCC8", "#D2EBDD"], hl: "#F5F0B8" },
+    { name: "Sky & lilac", sections: ["#D3E4F2", "#D9DDF4", "#E2D8F0", "#CFE8E1", "#EBD9F0"], hl: "#D9DDF4" },
+  ];
+  const TOOLBAR_SWATCH_IDX = [0, 1, 2, 6, 9, 12, 14]; // blush, pastel pink, rose quartz, butter, sage, sky, lavender
+  const DEFAULT_PALETTE = { sections: PRESETS[0].sections.slice(), hl: PRESETS[0].hl, preset: "Macaron" };
 
   // ---------------------------------------------------------------------
   // State
@@ -30,22 +49,35 @@
     lastInputAt: Date.now(),
     lastDialChangeAt: 0,
     events: [],
+    leafIndex: null,
+    lastRailSection: undefined,
+    palette: DEFAULT_PALETTE,
+    paletteOpen: false,
+    paletteMode: "highlight",
+    paletteSlot: 0,
+    highlights: [],
+    hlContext: null,
   };
 
   const el = (id) => document.getElementById(id);
   const $startScreen = el("start-screen");
   const $app = el("app");
   const $content = el("content");
-  const $rootGist = el("root-gist");
-  const $breadcrumb = el("breadcrumb");
+  const $docTitle = el("doc-title");
+  const $docHook = el("doc-hook");
   const $dial = el("dial");
-  const $dialReadout = el("dial-readout");
   const $liveRegion = el("live-region");
   const $popover = el("source-popover");
   const $resumeCard = el("resume-card");
   const $resumeCardText = el("resume-card-text");
   const $zoomHint = el("zoom-hint");
   const $topSpacer = el("top-spacer");
+  const $sectionNav = el("section-nav");
+  const $navItems = el("nav-items");
+  const $rail = el("rail");
+  const $paletteBtn = el("palette-btn");
+  const $palettePanel = el("palette-panel");
+  const $hlToolbar = el("highlight-toolbar");
   let topSpacerPx = 0;
   function resetTopSpacer() {
     topSpacerPx = 0;
@@ -54,7 +86,7 @@
 
   // ---------------------------------------------------------------------
   // Pointer tracking — used to resolve "the passage under the pointer" for
-  // every zoom gesture (Z-drag, ctrl+wheel/pinch, arrow/+-  keys).
+  // every zoom gesture (Z-drag, ctrl+wheel/pinch, arrow/+-/pill keys).
   // ---------------------------------------------------------------------
   const lastMouse = { x: null, y: null };
   window.addEventListener(
@@ -101,8 +133,6 @@
   function flushEvents(useBeacon) {
     if (state.events.length === 0) return;
     if (IS_FIXTURE) {
-      // No backend to receive events in fixture mode; drop rather than
-      // spamming the console with failed requests against the static server.
       state.events = [];
       return;
     }
@@ -112,9 +142,7 @@
     if (useBeacon && navigator.sendBeacon) {
       navigator.sendBeacon("/api/events", new Blob([body], { type: "application/json" }));
     } else {
-      fetch("/api/events", { method: "POST", headers: { "Content-Type": "application/json" }, body }).catch(() => {
-        // best-effort; drop on failure rather than blocking the UI
-      });
+      fetch("/api/events", { method: "POST", headers: { "Content-Type": "application/json" }, body }).catch(() => {});
     }
   }
 
@@ -130,7 +158,6 @@
     }
   });
 
-  // idle tracking: no input for >60s, emitted on return
   function markInput() {
     const now = Date.now();
     const idleMs = now - state.lastInputAt;
@@ -141,7 +168,7 @@
   }
 
   // ---------------------------------------------------------------------
-  // localStorage resume
+  // localStorage: resume, palette, highlights
   // ---------------------------------------------------------------------
   function posKey(treeId) {
     return "riemann:pos:" + treeId;
@@ -154,9 +181,7 @@
         posKey(state.tree.id),
         JSON.stringify({ z: state.z, anchor_node_id: state.anchorNodeId, anchor_offset: state.anchorOffset })
       );
-    } catch (e) {
-      /* storage unavailable; ignore */
-    }
+    } catch (e) {}
   }
 
   const savePositionDebounced = debounce(savePosition, 400);
@@ -178,6 +203,51 @@
     };
   }
 
+  function loadPalette() {
+    try {
+      const raw = localStorage.getItem("riemann:palette");
+      if (raw) {
+        const p = JSON.parse(raw);
+        if (p && Array.isArray(p.sections) && p.sections.length === 5 && p.hl) {
+          return { sections: p.sections, hl: p.hl, preset: p.preset || null };
+        }
+      }
+    } catch (e) {}
+    return { sections: DEFAULT_PALETTE.sections.slice(), hl: DEFAULT_PALETTE.hl, preset: DEFAULT_PALETTE.preset };
+  }
+
+  function savePalette() {
+    try {
+      localStorage.setItem("riemann:palette", JSON.stringify(state.palette));
+    } catch (e) {}
+  }
+
+  function applyPaletteToCSS() {
+    const root = document.documentElement.style;
+    state.palette.sections.forEach((c, i) => root.setProperty(`--sec-${i + 1}`, c));
+    root.setProperty("--hl", state.palette.hl);
+  }
+
+  function hlStorageKey(treeId) {
+    return "riemann:hl:" + treeId;
+  }
+
+  function loadHighlights(treeId) {
+    try {
+      const raw = localStorage.getItem(hlStorageKey(treeId));
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveHighlights() {
+    if (!state.tree) return;
+    try {
+      localStorage.setItem(hlStorageKey(state.tree.id), JSON.stringify(state.highlights));
+    } catch (e) {}
+  }
+
   // ---------------------------------------------------------------------
   // Word / reading-time helpers
   // ---------------------------------------------------------------------
@@ -196,12 +266,10 @@
     const words = frontierWords(tree, state.frontier);
     const minutes = Math.max(1, Math.round(words / WPM));
     const pct = Math.max(1, Math.round((words / Math.max(1, tree.source_words)) * 100));
-    $dialReadout.textContent = `~${minutes} min · ${pct}% of original`;
+    $dial.textContent = `~${minutes} min · ${pct}% of original`;
     const valuetext = `about ${minutes} minute${minutes === 1 ? "" : "s"}, ${pct} percent of original`;
     $dial.setAttribute("aria-valuetext", valuetext);
     $dial.setAttribute("aria-valuenow", String(Math.round(state.z * 100)));
-    const fillPct = Math.round(state.z * 100);
-    $dial.style.background = `linear-gradient(to right, var(--accent) ${fillPct}%, var(--rule) ${fillPct}%)`;
     scheduleAnnounce(valuetext);
   }
 
@@ -223,7 +291,6 @@
       if (node.dataset && node.dataset.nodeId) return node.dataset.nodeId;
       node = node.parentElement;
     }
-    // fallback: first rendered node
     return state.frontier[0] || state.tree.root;
   }
 
@@ -235,6 +302,8 @@
     if (prev !== nodeId) {
       state.sequence = window.Frontier.buildExpansionSequence(state.tree, nodeId);
       handleDwellChange(nodeId);
+      updateNavCurrent();
+      updateRail();
     }
     savePositionDebounced();
   }
@@ -252,18 +321,250 @@
   }
 
   // ---------------------------------------------------------------------
+  // Sections: node grouping, nav, rail
+  // ---------------------------------------------------------------------
+  function sectionsOf(tree) {
+    return tree.sections && tree.sections.length ? tree.sections : [];
+  }
+
+  function sectionAncestor(tree, nodeId) {
+    const secs = sectionsOf(tree);
+    if (!secs.length) return null;
+    const secSet = new Set(secs);
+    let id = nodeId;
+    let guard = 0;
+    while (id != null && guard++ < 200) {
+      if (secSet.has(id)) return id;
+      const n = tree.nodes[id];
+      if (!n) return null;
+      id = n.parent;
+    }
+    return null;
+  }
+
+  function firstClause(text) {
+    const m = (text || "").match(/^[^.!?\n]{1,80}/);
+    return (m ? m[0] : text || "").trim();
+  }
+
+  function nodeTitle(node) {
+    return (node && (node.title || firstClause(node.text))) || "";
+  }
+
+  function computeLeafIndex(tree) {
+    const index = {};
+    let counter = 0;
+    (function walk(id) {
+      const n = tree.nodes[id];
+      if (!n) return;
+      if (n.is_leaf) {
+        counter += 1;
+        index[id] = counter;
+      } else {
+        for (const c of n.children) walk(c);
+      }
+    })(tree.root);
+    return index;
+  }
+
+  function nodeProvenance(node) {
+    const li = state.leafIndex;
+    if (!li) return "";
+    if (node.is_leaf) {
+      const idx = li[node.id];
+      return idx ? `¶ ${idx}` : "";
+    }
+    const idxs = (node.cites || []).map((id) => li[id]).filter((x) => x != null);
+    if (!idxs.length) return "";
+    const mn = Math.min(...idxs);
+    const mx = Math.max(...idxs);
+    return mn === mx ? `¶ ${mn}` : `¶ ${mn}–${mx}`;
+  }
+
+  function buildNav() {
+    const tree = state.tree;
+    const secs = sectionsOf(tree);
+    const hasSections = secs.length > 0;
+    $app.classList.toggle("no-sections", !hasSections);
+    if (!hasSections) {
+      $navItems.innerHTML = "";
+      return;
+    }
+    $navItems.innerHTML = secs
+      .map((id, i) => {
+        const n = tree.nodes[id];
+        const nn = String(i + 1).padStart(2, "0");
+        const slot = (i % 5) + 1;
+        return `<button type="button" class="nav-item" data-section-id="${id}" data-slot="${slot}">
+          <span class="nav-dot" style="background: var(--sec-${slot})"></span>
+          <span class="nav-n">${nn}</span><span class="nav-title">${escapeHtml(nodeTitle(n))}</span>
+        </button>`;
+      })
+      .join("");
+  }
+
+  function updateNavCurrent() {
+    if (!state.tree) return;
+    const secId = state.anchorNodeId ? sectionAncestor(state.tree, state.anchorNodeId) : null;
+    for (const btn of $navItems.querySelectorAll(".nav-item")) {
+      const isCur = btn.dataset.sectionId === secId;
+      btn.classList.toggle("current", isCur);
+      const dot = btn.querySelector(".nav-dot");
+      if (isCur) {
+        dot.style.visibility = "hidden";
+        btn.style.background = `var(--sec-${btn.dataset.slot})`;
+      } else {
+        dot.style.visibility = "";
+        btn.style.background = "";
+      }
+    }
+  }
+
+  $navItems.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-section-id]");
+    if (!btn) return;
+    jumpToNode(btn.dataset.sectionId);
+  });
+
+  function renderRailCardsHTML(secNode, upNextNode, secs, idx) {
+    const parts = [];
+    if (secNode.key_fact) {
+      parts.push(
+        `<div class="rail-card key-fact"><span class="rail-label">KEY FACT</span>` +
+          `<span class="fact-big">${escapeHtml(secNode.key_fact.big)}</span>` +
+          `<span class="fact-detail">${escapeHtml(secNode.key_fact.detail)}</span></div>`
+      );
+    }
+    if (secNode.steps && secNode.steps.length) {
+      parts.push(
+        `<div class="rail-card panel"><span class="rail-label">HOW IT WORKS</span>` +
+          `<div class="step-chips">${secNode.steps.map((s) => `<span class="step-chip">${escapeHtml(s)}</span>`).join("")}</div></div>`
+      );
+    } else if (secNode.key_points && secNode.key_points.length) {
+      parts.push(
+        `<div class="rail-card panel"><span class="rail-label">KEY POINTS</span>` +
+          `<ul class="key-points">${secNode.key_points.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul></div>`
+      );
+    }
+    if (upNextNode) {
+      const nn2 = String(idx + 2).padStart(2, "0");
+      parts.push(
+        `<button type="button" class="rail-card up-next" data-jump="${secs[idx + 1]}">` +
+          `<span class="rail-label">UP NEXT &middot; ${nn2}</span>` +
+          `<span class="up-next-title">${escapeHtml(nodeTitle(upNextNode))}</span>` +
+          (upNextNode.hook ? `<span class="up-next-hook">${escapeHtml(upNextNode.hook)}</span>` : "") +
+          `</button>`
+      );
+    }
+    return parts.join("");
+  }
+
+  function railCardsForSection(tree, secId) {
+    const secs = sectionsOf(tree);
+    const idx = secs.indexOf(secId);
+    if (idx < 0) return "";
+    const secNode = tree.nodes[secId];
+    const upNextId = secs[idx + 1];
+    const upNextNode = upNextId ? tree.nodes[upNextId] : null;
+    return renderRailCardsHTML(secNode, upNextNode, secs, idx);
+  }
+
+  function updateRail() {
+    const tree = state.tree;
+    if (!tree || !$rail) return;
+    const secId = state.anchorNodeId ? sectionAncestor(tree, state.anchorNodeId) : null;
+    if (secId === state.lastRailSection) return;
+    state.lastRailSection = secId;
+    const doUpdate = () => {
+      $rail.innerHTML = secId ? railCardsForSection(tree, secId) : "";
+    };
+    if (REDUCED_MOTION) {
+      doUpdate();
+      return;
+    }
+    $rail.style.opacity = "0";
+    setTimeout(() => {
+      doUpdate();
+      requestAnimationFrame(() => {
+        $rail.style.opacity = "1";
+      });
+    }, 180);
+  }
+
+  $rail.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-jump]");
+    if (!btn) return;
+    jumpToNode(btn.dataset.jump);
+  });
+
+  // ---------------------------------------------------------------------
   // Rendering
   // ---------------------------------------------------------------------
-  function renderNodeHTML(node) {
-    const html = window.marked ? window.marked.parse(node.text || "") : escapeHtml(node.text || "");
-    if (node.is_leaf) {
-      return `<div class="node leaf" data-node-id="${node.id}">${html}</div>`;
-    }
-    return `<div class="node summary" data-node-id="${node.id}"><span class="source-hint">${html}</span></div>`;
+  function renderNodeBlockHTML(node) {
+    const html = window.marked ? window.marked.parse(node.text || "") : `<p>${escapeHtml(node.text || "")}</p>`;
+    const isLeaf = node.is_leaf;
+    const cls = ["node", isLeaf ? "leaf" : "summary", node.atomic ? "atomic" : ""].filter(Boolean).join(" ");
+    const bodyCls = isLeaf ? "node-body" : "node-body source-hint";
+    const prov = nodeProvenance(node);
+    return `<div class="${cls}" data-node-id="${node.id}">
+      <div class="node-head"><h2 class="node-title">${escapeHtml(nodeTitle(node))}</h2>${
+      prov ? `<span class="provenance">${escapeHtml(prov)}</span>` : ""
+    }</div>
+      <div class="${bodyCls}">${html}</div>
+    </div>`;
   }
 
   function escapeHtml(s) {
-    return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    return (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  function groupFrontierBySections(tree, frontier) {
+    const groups = [];
+    let cur = null;
+    for (const id of frontier) {
+      const sec = sectionAncestor(tree, id);
+      if (!cur || cur.sectionId !== sec) {
+        cur = { sectionId: sec, ids: [] };
+        groups.push(cur);
+      }
+      cur.ids.push(id);
+    }
+    return groups;
+  }
+
+  function renderSectionGroupHTML(tree, group) {
+    if (!group.sectionId) {
+      return `<div class="section-grid">${group.ids.map((id) => renderNodeBlockHTML(tree.nodes[id])).join("")}</div>`;
+    }
+    const secs = sectionsOf(tree);
+    const idx = secs.indexOf(group.sectionId);
+    const slot = (idx % 5) + 1;
+    const nn = String(idx + 1).padStart(2, "0");
+    const secNode = tree.nodes[group.sectionId];
+    const title = nodeTitle(secNode);
+    const railHTML = railCardsForSection(tree, group.sectionId);
+    return `<div class="section-block" data-section-id="${group.sectionId}" style="--sec-n: var(--sec-${slot})">
+      <div class="section-header">
+        <span class="section-kicker"><span class="pill-n">${nn}</span> &middot; ${escapeHtml(title.toUpperCase())}</span>
+        <h1>${escapeHtml(title)}</h1>
+        ${secNode.hook ? `<p class="section-hook">${escapeHtml(secNode.hook)}</p>` : ""}
+      </div>
+      <div class="section-grid">${group.ids.map((id) => renderNodeBlockHTML(tree.nodes[id])).join("")}</div>
+      <div class="section-rail-inline">${railHTML}</div>
+    </div>`;
+  }
+
+  function contentHTML() {
+    const tree = state.tree;
+    const frontier = state.frontier;
+    if (frontier.length === 1 && frontier[0] === tree.root) {
+      const root = tree.nodes[tree.root];
+      return `<div class="root-hero"><h1>${escapeHtml(nodeTitle(root) || tree.title || "")}</h1><p>${escapeHtml(
+        root.hook || root.text || ""
+      )}</p></div>`;
+    }
+    const groups = groupFrontierBySections(tree, frontier);
+    return groups.map((g) => renderSectionGroupHTML(tree, g)).join("");
   }
 
   // Natural (pre-transform) rects from the most recent render, keyed by
@@ -279,13 +580,11 @@
     const tree = state.tree;
     const prevRects = new Map();
     if (!REDUCED_MOTION && !opts.columnCrossfade) {
-      // Record rects of nodes that will persist (present in both old and new frontier).
       for (const elNode of $content.querySelectorAll("[data-node-id]")) {
         prevRects.set(elNode.dataset.nodeId, elNode.getBoundingClientRect());
       }
     }
 
-    const newSet = new Set(state.frontier);
     const oldIds = Array.from($content.querySelectorAll("[data-node-id]")).map((n) => n.dataset.nodeId);
     const oldSet = new Set(oldIds);
 
@@ -307,12 +606,12 @@
     if (opts.onRendered) opts.onRendered();
 
     function doRender() {
-      $content.innerHTML = state.frontier.map((id) => renderNodeHTML(tree.nodes[id])).join("");
-      updateRootHeader();
-      updateBreadcrumb();
+      $content.innerHTML = contentHTML();
+      applyHighlightsToDOM();
+      updateHeader();
+      updateNavCurrent();
+      updateRail();
 
-      // Capture true post-layout, pre-transform rects for every rendered
-      // node before any FLIP transform is applied below.
       lastRenderRects = new Map();
       for (const elNode of $content.querySelectorAll("[data-node-id]")) {
         lastRenderRects.set(elNode.dataset.nodeId, elNode.getBoundingClientRect());
@@ -320,7 +619,6 @@
 
       if (REDUCED_MOTION) return;
 
-      // FLIP for persisted nodes; fade for new ones.
       for (const elNode of $content.querySelectorAll("[data-node-id]")) {
         const id = elNode.dataset.nodeId;
         if (prevRects.has(id)) {
@@ -331,7 +629,7 @@
             elNode.style.transform = `translateY(${dy}px)`;
             elNode.style.transition = "none";
             requestAnimationFrame(() => {
-              elNode.style.transition = `transform ${180}ms ease`;
+              elNode.style.transition = `transform 180ms ease`;
               elNode.style.transform = "";
             });
           }
@@ -343,65 +641,334 @@
     }
   }
 
-  function updateRootHeader() {
+  function updateHeader() {
     const tree = state.tree;
     const root = tree.nodes[tree.root];
-    $rootGist.textContent = root ? root.text : "";
-    $rootGist.classList.toggle("provisional", !!tree.provisional_root);
+    $docTitle.textContent = (tree.title || "").toUpperCase();
+    let hookText = (root && (root.hook || root.text)) || "";
+    if (tree.provisional_root) hookText += " · gist coming…";
+    $docHook.textContent = hookText;
   }
-
-  function ancestorsOf(nodeId) {
-    const out = [];
-    let n = state.tree.nodes[nodeId];
-    while (n && n.parent) {
-      n = state.tree.nodes[n.parent];
-      if (n) out.push(n.id);
-    }
-    return out; // nearest first
-  }
-
-  function firstClause(text) {
-    const m = (text || "").match(/^[^.!?\n]{1,80}/);
-    return (m ? m[0] : text || "").trim();
-  }
-
-  function updateBreadcrumb() {
-    if (!state.anchorNodeId) {
-      $breadcrumb.classList.remove("visible");
-      return;
-    }
-    const ancestors = ancestorsOf(state.anchorNodeId).filter((id) => id !== state.tree.root);
-    // Off-screen ancestors: none of the anchor's ancestors are currently rendered
-    // (only frontier nodes are DOM nodes), so show the breadcrumb whenever there
-    // is meaningful ancestry between the persistent header and the anchor, and
-    // the reading column has scrolled past its start.
-    const firstEl = $content.querySelector("[data-node-id]");
-    const scrolledPast = firstEl && firstEl.getBoundingClientRect().top < -8;
-    if (ancestors.length === 0 || !scrolledPast) {
-      $breadcrumb.classList.remove("visible");
-      return;
-    }
-    const nearest = ancestors.slice(0, 2).reverse();
-    $breadcrumb.innerHTML = nearest
-      .map(
-        (id, i) =>
-          `<button type="button" data-jump="${id}">${escapeHtml(firstClause(state.tree.nodes[id].text))}</button>` +
-          (i < nearest.length - 1 ? '<span class="sep">&rsaquo;</span>' : "")
-      )
-      .join("");
-    $breadcrumb.classList.add("visible");
-  }
-
-  $breadcrumb.addEventListener("click", (e) => {
-    const btn = e.target.closest("[data-jump]");
-    if (!btn) return;
-    jumpToNode(btn.dataset.jump);
-  });
 
   el("home-btn").addEventListener("click", () => {
     resetTopSpacer();
     setZ(0, "home");
     window.scrollTo(0, 0);
+  });
+
+  // ---------------------------------------------------------------------
+  // Highlights: apply to DOM, add/edit toolbar
+  // ---------------------------------------------------------------------
+  function applyHighlightsToDOM() {
+    if (!state.highlights.length) return;
+    for (const elNode of $content.querySelectorAll("[data-node-id]")) {
+      const nodeId = elNode.dataset.nodeId;
+      const body = elNode.querySelector(".node-body");
+      if (!body) continue;
+      const hls = state.highlights
+        .filter((h) => h.nodeId === nodeId)
+        .slice()
+        .sort((a, b) => b.start - a.start); // reverse order so earlier offsets stay valid
+      for (const h of hls) wrapTextRange(body, h.start, h.end, h.colour, h.id);
+    }
+  }
+
+  function findTextPos(container, target) {
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+    let acc = 0;
+    let node;
+    while ((node = walker.nextNode())) {
+      const len = node.textContent.length;
+      if (acc + len >= target) return { node, offset: target - acc };
+      acc += len;
+    }
+    return null;
+  }
+
+  function wrapTextRange(container, start, end, colour, hlId) {
+    if (end <= start) return;
+    const startPos = findTextPos(container, start);
+    const endPos = findTextPos(container, end);
+    if (!startPos || !endPos) return;
+    try {
+      const range = document.createRange();
+      range.setStart(startPos.node, startPos.offset);
+      range.setEnd(endPos.node, endPos.offset);
+      const mark = document.createElement("mark");
+      mark.style.setProperty("--mark-colour", colour);
+      mark.dataset.hlId = hlId;
+      try {
+        range.surroundContents(mark);
+      } catch (e) {
+        const frag = range.extractContents();
+        mark.appendChild(frag);
+        range.insertNode(mark);
+      }
+    } catch (e) {
+      /* offsets out of range for current markup; skip */
+    }
+  }
+
+  function rangeStartOffset(container, range) {
+    const pre = document.createRange();
+    pre.selectNodeContents(container);
+    pre.setEnd(range.startContainer, range.startOffset);
+    return pre.toString().length;
+  }
+
+  function hideHighlightToolbar() {
+    $hlToolbar.hidden = true;
+    state.hlContext = null;
+  }
+
+  function positionToolbar(rect) {
+    const top = Math.max(8, rect.top - 44);
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - 260));
+    $hlToolbar.style.top = `${top}px`;
+    $hlToolbar.style.left = `${left}px`;
+  }
+
+  function renderHighlightToolbar(ctx) {
+    const current = ctx.mode === "edit" ? ctx.colour : state.palette.hl;
+    const swatches = TOOLBAR_SWATCH_IDX.map((i) => {
+      const [label, c] = PALETTE[i];
+      return `<button type="button" class="hl-swatch" data-hex="${c}" aria-label="${label}" aria-pressed="${
+        current === c
+      }" style="background:${c}"></button>`;
+    }).join("");
+    const actionBtn =
+      ctx.mode === "edit"
+        ? `<button type="button" class="hl-action" data-action="remove">Remove</button>`
+        : `<button type="button" class="hl-action" data-action="cancel">Cancel</button>`;
+    $hlToolbar.innerHTML = `${swatches}<span class="hl-sep"></span>${actionBtn}`;
+    $hlToolbar.hidden = false;
+    state.hlContext = ctx;
+  }
+
+  function showHighlightToolbar(rect, ctx) {
+    positionToolbar(rect);
+    renderHighlightToolbar(ctx);
+  }
+
+  function handleSelectionMaybeShowToolbar() {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !sel.toString().trim()) {
+      if (state.hlContext && state.hlContext.mode === "add") hideHighlightToolbar();
+      return;
+    }
+    const range = sel.getRangeAt(0);
+    const container = range.commonAncestorContainer;
+    const startEl = container.nodeType === 1 ? container : container.parentElement;
+    const body = startEl && startEl.closest(".node-body");
+    if (!body) return;
+    const wrapper = body.closest("[data-node-id]");
+    if (!wrapper) return;
+    const nodeId = wrapper.dataset.nodeId;
+    const start = rangeStartOffset(body, range);
+    const end = start + range.toString().length;
+    if (end <= start) return;
+    showHighlightToolbar(range.getBoundingClientRect(), { mode: "add", nodeId, start, end });
+  }
+
+  // e.target on a mouseup/mousedown is frequently a Text node (a selection
+  // commonly ends inside one) or even `document` itself — neither has
+  // `.closest`, so normalize to the nearest Element first.
+  function targetElement(e) {
+    const t = e.target;
+    if (!t) return null;
+    if (t.nodeType === 1) return t;
+    return t.parentElement || null;
+  }
+
+  document.addEventListener("mouseup", (e) => {
+    const t = targetElement(e);
+    if (t && t.closest("#highlight-toolbar")) return;
+    setTimeout(handleSelectionMaybeShowToolbar, 0);
+  });
+
+  document.addEventListener("mousedown", (e) => {
+    const t = targetElement(e);
+    if (t && t.closest("#highlight-toolbar")) return;
+    if (t && t.closest("mark[data-hl-id]")) return;
+    if (!$hlToolbar.hidden) hideHighlightToolbar();
+  });
+
+  $hlToolbar.addEventListener("click", (e) => {
+    const swatchBtn = e.target.closest(".hl-swatch");
+    const actionBtn = e.target.closest(".hl-action");
+    const ctx = state.hlContext;
+    if (!ctx) return;
+    if (swatchBtn) {
+      const hex = swatchBtn.dataset.hex;
+      if (ctx.mode === "add") {
+        const id = "hl" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        state.highlights.push({ id, nodeId: ctx.nodeId, start: ctx.start, end: ctx.end, colour: hex });
+        logEvent("highlight", { action: "add", tree_id: state.tree.id, node_id: ctx.nodeId, colour: hex });
+      } else {
+        const h = state.highlights.find((x) => x.id === ctx.id);
+        if (h) {
+          h.colour = hex;
+          logEvent("highlight", { action: "recolour", tree_id: state.tree.id, node_id: h.nodeId, colour: hex });
+        }
+      }
+      saveHighlights();
+      hideHighlightToolbar();
+      window.getSelection().removeAllRanges();
+      render({});
+    } else if (actionBtn && actionBtn.dataset.action === "remove") {
+      const idx = state.highlights.findIndex((x) => x.id === ctx.id);
+      if (idx >= 0) {
+        const [rm] = state.highlights.splice(idx, 1);
+        logEvent("highlight", { action: "remove", tree_id: state.tree.id, node_id: rm.nodeId, colour: rm.colour });
+      }
+      saveHighlights();
+      hideHighlightToolbar();
+      render({});
+    } else {
+      hideHighlightToolbar();
+      window.getSelection().removeAllRanges();
+    }
+  });
+
+  $content.addEventListener("click", (e) => {
+    const mark = e.target.closest("mark[data-hl-id]");
+    if (mark) {
+      e.stopPropagation();
+      const h = state.highlights.find((x) => x.id === mark.dataset.hlId);
+      if (h) showHighlightToolbar(mark.getBoundingClientRect(), { mode: "edit", id: h.id, colour: h.colour });
+      return;
+    }
+    const hint = e.target.closest(".source-hint");
+    if (!hint) return;
+    const nodeEl = hint.closest("[data-node-id]");
+    const node = state.tree.nodes[nodeEl.dataset.nodeId];
+    if (!node || !node.cites || node.cites.length === 0) return;
+    jumpToLeaf(node.cites[0]);
+  });
+
+  // ---------------------------------------------------------------------
+  // Palette panel
+  // ---------------------------------------------------------------------
+  function renderPalettePanel() {
+    const $presets = el("palette-presets");
+    $presets.innerHTML = PRESETS.map((p) => {
+      const pressed = state.palette.preset === p.name;
+      const dots = p.sections.map((c) => `<span style="background:${c}"></span>`).join("");
+      return `<button type="button" class="palette-preset" data-preset="${p.name}" aria-pressed="${pressed}"><span class="dots">${dots}</span><span>${p.name}</span></button>`;
+    }).join("");
+
+    const $slots = el("palette-slots");
+    $slots.innerHTML = state.palette.sections
+      .map((c, i) => {
+        const pressed = state.paletteMode === "sections" && state.paletteSlot === i;
+        return `<button type="button" class="palette-slot" data-slot="${i}" aria-pressed="${pressed}" aria-label="Section ${
+          i + 1
+        } colour" style="background:${c}">${String(i + 1).padStart(2, "0")}</button>`;
+      })
+      .join("");
+
+    el("palette-swatch-heading").textContent =
+      state.paletteMode === "highlight"
+        ? "PASTELS · CHOOSING THE HIGHLIGHTER COLOUR"
+        : `PASTELS · CHOOSING SECTION ${String(state.paletteSlot + 1).padStart(2, "0")}'S COLOUR`;
+
+    const target = state.paletteMode === "highlight" ? state.palette.hl : state.palette.sections[state.paletteSlot];
+    el("palette-swatches").innerHTML = PALETTE.map(([label, c]) => {
+      const pressed = target === c;
+      return `<button type="button" class="palette-swatch" data-hex="${c}" aria-label="${label}" title="${label}" aria-pressed="${pressed}" style="background:${c}"></button>`;
+    }).join("");
+
+    el("mode-highlight").setAttribute("aria-pressed", state.paletteMode === "highlight");
+    el("mode-sections").setAttribute("aria-pressed", state.paletteMode === "sections");
+  }
+
+  function renderPaletteOpenState() {
+    $palettePanel.hidden = !state.paletteOpen;
+    $paletteBtn.setAttribute("aria-expanded", String(state.paletteOpen));
+    $paletteBtn.setAttribute("aria-pressed", String(state.paletteOpen));
+    if (state.paletteOpen) {
+      renderPalettePanel();
+      const first = $palettePanel.querySelector("button");
+      if (first) first.focus();
+    } else {
+      $paletteBtn.focus();
+    }
+  }
+
+  $paletteBtn.addEventListener("click", () => {
+    state.paletteOpen = !state.paletteOpen;
+    renderPaletteOpenState();
+  });
+  el("palette-close").addEventListener("click", () => {
+    state.paletteOpen = false;
+    renderPaletteOpenState();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (state.paletteOpen && e.key === "Escape") {
+      state.paletteOpen = false;
+      renderPaletteOpenState();
+    }
+  });
+  $palettePanel.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab" || !state.paletteOpen) return;
+    const f = Array.from($palettePanel.querySelectorAll("button")).filter((b) => b.offsetParent !== null);
+    if (!f.length) return;
+    const first = f[0];
+    const last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
+
+  el("palette-presets").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-preset]");
+    if (!btn) return;
+    const p = PRESETS.find((pp) => pp.name === btn.dataset.preset);
+    if (!p) return;
+    state.palette = { sections: p.sections.slice(), hl: p.hl, preset: p.name };
+    applyPaletteToCSS();
+    savePalette();
+    renderPalettePanel();
+    logEvent("palette", { field: "preset", value: p.name });
+  });
+
+  el("palette-slots").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-slot]");
+    if (!btn) return;
+    state.paletteMode = "sections";
+    state.paletteSlot = Number(btn.dataset.slot);
+    renderPalettePanel();
+  });
+
+  el("palette-swatches").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-hex]");
+    if (!btn) return;
+    const hex = btn.dataset.hex;
+    if (state.paletteMode === "highlight") {
+      state.palette = { sections: state.palette.sections.slice(), hl: hex, preset: null };
+      logEvent("palette", { field: "hl", value: hex });
+    } else {
+      const sections = state.palette.sections.slice();
+      sections[state.paletteSlot] = hex;
+      state.palette = { sections, hl: state.palette.hl, preset: null };
+      logEvent("palette", { field: "slot", value: { slot: state.paletteSlot, colour: hex } });
+    }
+    applyPaletteToCSS();
+    savePalette();
+    renderPalettePanel();
+  });
+
+  el("mode-highlight").addEventListener("click", () => {
+    state.paletteMode = "highlight";
+    renderPalettePanel();
+  });
+  el("mode-sections").addEventListener("click", () => {
+    state.paletteMode = "sections";
+    renderPalettePanel();
   });
 
   // ---------------------------------------------------------------------
@@ -412,8 +979,6 @@
     state.lastDialChangeAt = Date.now();
     const clamped = Math.max(0, Math.min(1, newZ));
     const zFrom = state.z;
-    // Pushing past either end (or a sub-step change) alters nothing visible:
-    // skip the re-render entirely rather than re-anchoring against itself.
     if (state.sequence && state.frontier &&
         window.Frontier.zToK(clamped, state.sequence.length) === window.Frontier.zToK(zFrom, state.sequence.length)) {
       state.z = clamped;
@@ -422,13 +987,6 @@
     }
     if (!state.anchorNodeId) setAnchor(findCentreNodeId());
 
-    // Record pre-expansion anchor screen position: either the y the caller
-    // wants preserved (the pointer's y, for a zoom-at-pointer gesture), or
-    // the anchor's own current on-screen position otherwise.
-    // The invariant: the exact point in the source text under the pointer
-    // (state.anchorOffset, a char offset) stays at the same screen y. A node's
-    // text is treated as spread evenly over its box, so a char offset maps to
-    // a y inside whichever rendered node currently contains it.
     let beforeY = forcedBeforeY;
     if (beforeY == null) {
       const anchorEl = $content.querySelector(`[data-node-id="${state.anchorNodeId}"]`);
@@ -439,34 +997,18 @@
     const { frontier } = window.Frontier.frontierAtZ(state.tree, state.sequence, state.z);
     state.frontier = frontier;
 
-    // The deferred whole-column crossfade is only for deliberate big jumps
-    // (home, clicking the indicator). During a continuous gesture it raced
-    // with the next queued step and applied steps to a stale layout.
     const GESTURES = ["zkey", "ctrlwheel", "key"];
     const bigJump = Math.abs(clamped - zFrom) > 0.15 && !GESTURES.includes(inputType);
-    // Re-anchor as soon as the new content is actually in the DOM (not on a
-    // *separate* rAF after render — a queued next step, e.g. mid Z-drag or
-    // wheel burst, must see the corrected scroll position immediately, or
-    // pointer-anchoring drifts across consecutive fast steps).
     render({
       columnCrossfade: bigJump,
       onRendered: () => {
         const offset = state.anchorOffset != null ? state.anchorOffset : 0;
         const replacement = window.Frontier.findFrontierNodeAtOffset(state.tree, state.frontier, offset);
         if (replacement) {
-          // Keep anchorOffset fixed for the whole gesture; resetting it to the
-          // replacement's midpoint each step made the pointed-at text drift.
           state.anchorNodeId = replacement;
-          // Use the natural (pre-FLIP-transform) rect, not a live query —
-          // a persisted node's live rect right now reflects its transform,
-          // i.e. its *old* visual position, not where it will actually
-          // rest once the transition finishes.
           const afterRect = lastRenderRects.get(replacement);
           if (afterRect && beforeY != null) {
             const delta = yOfOffset(replacement, afterRect, offset) - beforeY;
-            // Near the top of the page a collapse can need a negative scroll
-            // position. Grow the top spacer just enough instead of keeping a
-            // permanent empty gap above the text.
             const deficit = -(window.scrollY + delta);
             if (deficit > 0) {
               topSpacerPx += deficit;
@@ -483,6 +1025,7 @@
     updateReadout();
     savePositionDebounced();
     dismissHint();
+    hideHighlightToolbar();
     if (state.tree) {
       logEvent("dial", {
         tree_id: state.tree.id,
@@ -494,13 +1037,6 @@
     }
   }
 
-  // Resolve "the passage under the pointer" (or its fallback: viewport
-  // centre) into an anchor node + the y to keep it pinned at, and lock it
-  // in as the current anchor (recomputing the expansion sequence once).
-  // This is called exactly once per gesture — at the moment Z goes down,
-  // or at the first tick of a wheel/pinch burst — never per-step, or every
-  // step would re-shuffle the sequence around a slightly different anchor
-  // and the frontier would jump instead of moving incrementally.
   function beginPointerGesture(px, py) {
     let x = px;
     let y = py;
@@ -515,18 +1051,14 @@
       anchorY = y;
     } else {
       anchorId = findCentreNodeId();
-      const el2 = $content.querySelector(`[data-node-id="${anchorId}"]`);
       anchorY = window.innerHeight / 2;
     }
     if (anchorId && anchorId !== state.anchorNodeId) setAnchor(anchorId);
-    // Pin the exact text position under the pointer (not the node's midpoint).
-    const el = anchorId && $content.querySelector(`[data-node-id="${anchorId}"]`);
-    if (el) state.anchorOffset = offsetAtY(anchorId, el.getBoundingClientRect(), anchorY);
+    const elAnchor = anchorId && $content.querySelector(`[data-node-id="${anchorId}"]`);
+    if (elAnchor) state.anchorOffset = offsetAtY(anchorId, elAnchor.getBoundingClientRect(), anchorY);
     return anchorY;
   }
 
-  // Char offset <-> screen y inside a rendered node, assuming its text is
-  // spread evenly over the node's box (good enough at paragraph scale).
   function offsetAtY(nodeId, rect, y) {
     const [s0, s1] = state.tree.nodes[nodeId].source_span;
     const frac = rect.height > 0 ? Math.min(1, Math.max(0, (y - rect.top) / rect.height)) : 0.5;
@@ -538,10 +1070,6 @@
     return rect.top + frac * rect.height;
   }
 
-  // rAF-coalesced step queue for a single locked gesture: steps accumulate
-  // here and apply at most once per animation frame (against the fixed
-  // anchor + y captured by beginPointerGesture), so rendering never backs
-  // up behind a fast stream of mousemove/wheel events.
   let lockedPendingSteps = 0;
   let lockedInput = null;
   let lockedY = null;
@@ -562,15 +1090,25 @@
     });
   }
 
-  // A single discrete keyboard action (arrow keys, +/-): resolve the
-  // pointer anchor fresh (it's one atomic step, so there's no sequence to
-  // keep stable across it) and apply immediately.
   function stepOnce(deltaSteps, inputType) {
     if (!state.tree || deltaSteps === 0) return;
     const anchorY = beginPointerGesture(lastMouse.x, lastMouse.y);
     const total = Math.max(1, state.sequence.length);
     setZ(state.z + deltaSteps / total, inputType, anchorY);
   }
+
+  // The pill's Less/More buttons step at the viewport-centre anchor,
+  // regardless of where the pointer happens to be.
+  function stepAtViewportCentre(deltaSteps) {
+    if (!state.tree) return;
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+    const anchorY = beginPointerGesture(cx, cy);
+    const total = Math.max(1, state.sequence.length);
+    setZ(state.z + deltaSteps / total, "key", anchorY);
+  }
+  el("zoom-less").addEventListener("click", () => stepAtViewportCentre(-1));
+  el("zoom-more").addEventListener("click", () => stepAtViewportCentre(1));
 
   // ---- Keyboard: arrow keys / Home / End on the focused dial ----
   $dial.addEventListener("keydown", (e) => {
@@ -609,9 +1147,6 @@
   });
 
   // ---- Gesture 1: hold Z + move the mouse horizontally ----
-  // The anchor locks in once, when Z goes down. ~24px per expansion step,
-  // accumulated from the position when Z went down. Key auto-repeat is
-  // ignored; the gesture ends on keyup or blur.
   const Z_STEP_PX = 24;
   let zHeld = false;
   let zStartX = null;
@@ -655,11 +1190,6 @@
   window.addEventListener("blur", endZGesture);
 
   // ---- Gesture 2: Ctrl+wheel and trackpad pinch (arrives as ctrl+wheel) ----
-  // ~100 deltaY units per step for a real mouse wheel; pinch deltas are
-  // typically small/fractional, so they're scaled more aggressively (a
-  // comfortable pinch spans ~6 units per step) so it lands 1-3 steps. The
-  // anchor locks in at the first tick of a burst and holds until ~250ms of
-  // wheel inactivity, so a rapid run of ticks doesn't re-shuffle mid-burst.
   let wheelAccum = 0;
   let wheelBurstActive = false;
   let wheelGestureY = null;
@@ -691,41 +1221,8 @@
     { passive: false }
   );
 
-  // ---- The passive indicator: click/drag still sets z directly ----
-  $dial.addEventListener("click", (e) => {
-    const rect = $dial.getBoundingClientRect();
-    const frac = (e.clientX - rect.left) / rect.width;
-    setZ(frac, "indicator");
-  });
-
-  el("home-btn").addEventListener("click", () => {
-    setZ(0, "indicator");
-  });
-
-  // hold-and-drag on the readout for fine control
-  (function setupReadoutDrag() {
-    let dragging = false;
-    let startY = 0;
-    let startZ = 0;
-    $dialReadout.addEventListener("mousedown", (e) => {
-      dragging = true;
-      startY = e.clientY;
-      startZ = state.z;
-      e.preventDefault();
-    });
-    window.addEventListener("mousemove", (e) => {
-      if (!dragging) return;
-      const dy = startY - e.clientY;
-      setZ(startZ + dy / 400, "indicator");
-    });
-    window.addEventListener("mouseup", () => {
-      dragging = false;
-    });
-  })();
-
   // ---------------------------------------------------------------------
-  // One-time hint: shown on the very first open ever, gone after the first
-  // successful zoom gesture or 8s, and never shown again.
+  // One-time hint
   // ---------------------------------------------------------------------
   const HINT_KEY = "riemann:hint-seen";
   let hintTimer = null;
@@ -739,13 +1236,11 @@
   function markHintSeen() {
     try {
       localStorage.setItem(HINT_KEY, "1");
-    } catch (e) {
-      /* storage unavailable; nothing to persist */
-    }
+    } catch (e) {}
   }
   function maybeShowHint() {
     if (!$zoomHint || hintSeen()) return;
-    markHintSeen(); // mark now so it can never show twice, even if interrupted
+    markHintSeen();
     $zoomHint.hidden = false;
     requestAnimationFrame(() => $zoomHint.classList.add("visible"));
     hintTimer = setTimeout(dismissHint, 8000);
@@ -813,22 +1308,12 @@
     $popover.dataset.leafId = leafId;
   }
 
-  $content.addEventListener("click", (e) => {
-    const hint = e.target.closest(".source-hint");
-    if (!hint) return;
-    const nodeEl = hint.closest("[data-node-id]");
-    const node = state.tree.nodes[nodeEl.dataset.nodeId];
-    if (!node || !node.cites || node.cites.length === 0) return;
-    jumpToLeaf(node.cites[0]);
-  });
-
   function jumpToLeaf(leafId) {
     logEvent("jump_source", { tree_id: state.tree.id, leaf_id: leafId });
     jumpToNode(leafId);
   }
 
   function jumpToNode(nodeId) {
-    // Expand along the path to nodeId, then anchor on it.
     setAnchor(nodeId);
     const path = [];
     let n = state.tree.nodes[nodeId];
@@ -836,14 +1321,11 @@
       path.push(n.parent);
       n = state.tree.nodes[n.parent];
     }
-    // k must be large enough that every ancestor in `path` is expanded.
     let neededK = 0;
     path.forEach((id) => {
       const idx = state.sequence.indexOf(id);
       if (idx >= 0) neededK = Math.max(neededK, idx + 1);
     });
-    const idxSelf = state.sequence.indexOf(nodeId);
-    if (idxSelf >= 0) neededK = Math.max(neededK, 0); // node itself need not expand
     const total = Math.max(1, state.sequence.length);
     setZ(neededK / total, "key");
     $popover.classList.remove("visible");
@@ -864,7 +1346,6 @@
   // Tree loading
   // ---------------------------------------------------------------------
   function initialZForTree(tree) {
-    // Open near a ~2-minute frontier (or 1.0 if whole source is <=2 min).
     const totalMinutes = tree.source_words / WPM;
     if (totalMinutes <= 2) return 1.0;
     const sequence = window.Frontier.buildExpansionSequence(tree, tree.root);
@@ -888,8 +1369,12 @@
     resetTopSpacer();
     opts = opts || {};
     state.tree = tree;
+    state.leafIndex = computeLeafIndex(tree);
+    state.highlights = loadHighlights(tree.id);
+    state.lastRailSection = undefined;
     $startScreen.style.display = "none";
     $app.classList.add("active");
+    buildNav();
 
     const saved = !opts.forceFresh ? loadPosition(tree.id) : null;
     const anchorId = (saved && saved.anchor_node_id && tree.nodes[saved.anchor_node_id]) ? saved.anchor_node_id : tree.root;
@@ -898,12 +1383,26 @@
     state.anchorOffset = saved ? saved.anchor_offset : null;
 
     const z = saved ? saved.z : initialZForTree(tree);
-    state.z = 0; // force setZ to do real work below
+    state.z = 0;
     const { frontier } = window.Frontier.frontierAtZ(tree, state.sequence, z);
     state.frontier = frontier;
     state.z = z;
     render({});
     updateReadout();
+
+    // The anchor may still be the root (not itself in the frontier) after a
+    // fresh open with no saved position — resolve it to whatever's actually
+    // in view so the nav/rail reflect a real current section immediately.
+    if (!state.frontier.includes(state.anchorNodeId)) {
+      const initialAnchor = findCentreNodeId() || state.frontier[0];
+      if (initialAnchor && initialAnchor !== state.anchorNodeId) {
+        state.anchorNodeId = initialAnchor;
+        const n = tree.nodes[initialAnchor];
+        state.anchorOffset = n ? (n.source_span[0] + n.source_span[1]) / 2 : state.anchorOffset;
+        updateNavCurrent();
+        updateRail();
+      }
+    }
 
     logEvent("open", { tree_id: tree.id, resumed: !!saved });
     flushEvents(false);
@@ -914,10 +1413,6 @@
     window.addEventListener(
       "scroll",
       debounce(() => {
-        // Programmatic scrollBy calls from a dial-driven re-anchor (setZ)
-        // also fire native 'scroll' events; picking up viewport-centre here
-        // right after one would fight the pointer-anchored gesture that
-        // caused the scroll. Skip while that's recent.
         if (Date.now() - state.lastDialChangeAt < 400) return;
         const centreId = findCentreNodeId();
         if (centreId && centreId !== state.anchorNodeId) setAnchor(centreId);
@@ -928,7 +1423,7 @@
 
   function showResumeCard(anchorId) {
     const node = state.tree.nodes[anchorId];
-    $resumeCardText.textContent = `Back where you left off: ${firstClause(node ? node.text : "")}`;
+    $resumeCardText.textContent = `Back where you left off: ${firstClause(node ? nodeTitle(node) || node.text : "")}`;
     $resumeCard.classList.add("visible");
     const timer = setTimeout(() => $resumeCard.classList.remove("visible"), 4000);
     el("resume-card-dismiss").onclick = () => {
@@ -949,7 +1444,7 @@
     es.addEventListener("provisional_root", (e) => {
       applyNodes(JSON.parse(e.data));
       state.tree.provisional_root = true;
-      updateRootHeader();
+      updateHeader();
     });
     es.addEventListener("level", (e) => {
       applyNodes(JSON.parse(e.data));
@@ -958,11 +1453,15 @@
     es.addEventListener("done", (e) => {
       const data = JSON.parse(e.data);
       if (data.nodes) Object.assign(state.tree.nodes, data.nodes);
+      if (data.sections) state.tree.sections = data.sections;
       state.tree.status = "done";
       state.tree.provisional_root = false;
+      state.leafIndex = computeLeafIndex(state.tree);
       state.sequence = window.Frontier.buildExpansionSequence(state.tree, state.anchorNodeId || state.tree.root);
       const { frontier } = window.Frontier.frontierAtZ(state.tree, state.sequence, state.z);
       state.frontier = frontier;
+      buildNav();
+      state.lastRailSection = undefined;
       render({});
       updateReadout();
       es.close();
@@ -1040,15 +1539,15 @@
         openTree(tree);
         if (tree.status !== "done") subscribeEvents(tree.id);
       });
-    } catch (e) {
-      /* ignore */
-    }
+    } catch (e) {}
   }
 
   // ---------------------------------------------------------------------
   // Boot
   // ---------------------------------------------------------------------
   async function boot() {
+    state.palette = loadPalette();
+    applyPaletteToCSS();
     if (IS_FIXTURE) {
       const resp = await fetch("dev-fixture.json");
       const tree = await resp.json();
