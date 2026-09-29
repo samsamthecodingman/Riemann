@@ -45,8 +45,11 @@ def check(k, t):
     pairs = [("text", "bg"), ("body", "bg"), ("muted", "bg"), ("label", "bg"), ("label", "panel"), ("text", "panel"), ("body", "panel"),
              ("onAccent", "accent"), ("softText", "soft"), ("deepText", "deep"), ("deepSub", "deep"), ("deepLabel", "deep"),
              ("text", "chip"), ("muted", "panel")]
+    if t.get("mark"): pairs.append(("text", "mark"))
+    if t.get("flow"): pairs.append(("text", "flow"))
     bad = [(a, b, round(cr(t[a], t[b]), 2)) for a, b in pairs if cr(t[a], t[b]) < 4.5]
-    if t["accent"] and cr(t["accent"], t["bg"]) < 3: bad.append(("accent-as-text/UI", "bg", round(cr(t["accent"], t["bg"]), 2)))
+    edge = t.get("accentEdge", t["accent"])  # the visible boundary of accent-filled controls
+    if cr(edge, t["bg"]) < 3: bad.append(("accent edge", "bg", round(cr(edge, t["bg"]), 2)))
     return bad
 
 def board(k, t):
@@ -54,7 +57,7 @@ def board(k, t):
     ui, disp, bod = t["ui"], t["display"], t["body_font"]
     mono_up = "letter-spacing: 0.08em"
     sec = lambda n, title, cur=False: (
-      f'<a href="#" aria-current="true" style="display: flex; gap: 12px; padding: 12px; border-radius: {min(R,12)}px; text-decoration: none; color: {t["softText"]}; background: {t["soft"]}; box-shadow: inset 3px 0 0 {t["accent"]}; font-weight: 600"><span style="font-weight: 700; color: {t["softText"]}">{n}</span><span>{title}</span></a>'
+      f'<a href="#" aria-current="true" style="display: flex; gap: 12px; padding: 12px; border-radius: {min(R,12)}px; text-decoration: none; color: {t["softText"]}; background: {t["soft"]}; box-shadow: inset 3px 0 0 {t.get("accentEdge", t["accent"])}; font-weight: 600"><span style="font-weight: 700; color: {t["softText"]}">{n}</span><span>{title}</span></a>'
       if cur else
       f'<a href="#" style="display: flex; gap: 12px; padding: 12px; border-radius: {min(R,12)}px; text-decoration: none; color: {t["body"]}"><span style="font-weight: 700; color: {t["label"]}">{n}</span><span>{title}</span></a>')
     return f'''<!doctype html>
@@ -86,7 +89,7 @@ a{{color:{t["accent"]}}}a:hover{{color:{t["accent"]}}}
 <div style="display: flex; align-items: center; gap: 6px; padding: 6px; border-radius: {B}px; background: {t["chip"]}; border: 1px solid {t["border"]}">
 <button type="button" aria-label="Less detail" style="height: 36px; padding: 0 14px; border-radius: {B}px; border: 1px solid {t["border"]}; background: {t["panel"]}; color: {t["text"]}; font-family: '{ui}', sans-serif; font-size: 14px; font-weight: 600">− Less</button>
 <span style="font-size: 13px; color: {t["muted"]}; padding: 0 6px">~3 min · 49% of original</span>
-<button type="button" aria-label="More detail" style="height: 36px; padding: 0 14px; border-radius: {B}px; border: none; background: {t["accent"]}; color: {t["onAccent"]}; font-family: '{ui}', sans-serif; font-size: 14px; font-weight: 700">More +</button>
+<button type="button" aria-label="More detail" style="height: 36px; padding: 0 14px; border-radius: {B}px; border: {('1.5px solid ' + t['accentEdge']) if t.get('accentEdge') else 'none'}; background: {t["accent"]}; color: {t["onAccent"]}; font-family: '{ui}', sans-serif; font-size: 14px; font-weight: 700">More +</button>
 </div>
 </header>
 
@@ -108,7 +111,7 @@ a{{color:{t["accent"]}}}a:hover{{color:{t["accent"]}}}
 <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 36px; margin-top: 8px">
 <section style="display: flex; flex-direction: column; gap: 10px">
 <h2 style="margin: 0; font-size: 17px; font-weight: 700; color: {t["text"]}">Names → numbers</h2>
-<p style="margin: 0; font-family: '{bod}', serif; font-size: 17px; line-height: 1.65; color: {t["body"]}">Nobody wants to type a string of numbers to visit a website, so the internet layers a naming system, the Domain Name System or DNS, on top of raw IP addresses. When you type a domain name into a browser, your computer asks a DNS resolver to translate that name into an IP address before any connection can be made. This lookup is usually invisible and fast, cached at several levels, but it is also a common point of failure: <strong style="color: {t["text"]}">if DNS is broken or blocked, a website can be completely unreachable even though the server hosting it is running fine.</strong></p>
+<p style="margin: 0; font-family: '{bod}', serif; font-size: 17px; line-height: 1.65; color: {t["body"]}">Nobody wants to type a string of numbers to visit a website, so the internet layers a naming system, the Domain Name System or DNS, on top of raw IP addresses. When you type a domain name into a browser, your computer asks a DNS resolver to translate that name into an IP address before any connection can be made. This lookup is usually invisible and fast, cached at several levels, but it is also a common point of failure: <strong style="color: {t["text"]}; {('background: linear-gradient(transparent 52%, ' + t['mark'] + ' 52%); padding: 0 2px') if t.get('mark') else ''}">if DNS is broken or blocked, a website can be completely unreachable even though the server hosting it is running fine.</strong></p>
 </section>
 <section style="display: flex; flex-direction: column; gap: 10px">
 <h2 style="margin: 0; font-size: 17px; font-weight: 700; color: {t["text"]}">A hierarchy, so no server stores everything</h2>
@@ -126,9 +129,9 @@ a{{color:{t["accent"]}}}a:hover{{color:{t["accent"]}}}
 <div style="background: {t["panel"]}; border: 1px solid {t["border"]}; border-radius: {R}px; padding: 20px 24px; display: flex; flex-direction: column; gap: 12px">
 <span style="font-size: 12px; font-weight: 700; {mono_up}; color: {t["label"]}">HOW A NAME IS FOUND</span>
 <div style="display: flex; flex-direction: column; gap: 8px; font-size: 14px; color: {t["text"]}">
-<span style="padding: 8px 12px; border-radius: {min(R,8)}px; background: {t["chip"]}">Root servers</span>
+<span style="padding: 8px 12px; border-radius: {min(R,8)}px; background: {t.get("flow", t["chip"])}">Root servers</span>
 <span style="padding-left: 12px; color: {t["muted"]}">↓</span>
-<span style="padding: 8px 12px; border-radius: {min(R,8)}px; background: {t["chip"]}">.com / .org servers</span>
+<span style="padding: 8px 12px; border-radius: {min(R,8)}px; background: {t.get("flow", t["chip"])}">.com / .org servers</span>
 <span style="padding-left: 12px; color: {t["muted"]}">↓</span>
 <span style="padding: 8px 12px; border-radius: {min(R,8)}px; background: {t["soft"]}; color: {t["softText"]}; font-weight: 600">The domain's own servers → the record</span>
 </div>
@@ -153,13 +156,17 @@ return {{}};
 </html>
 '''
 
-failed = False
-for k, t in THEMES.items():
-    bad = check(k, t)
-    if bad:
-        failed = True; print("CONTRAST FAIL", k, bad)
-if failed: sys.exit(1)
-for k, t in THEMES.items():
-    open(f"{OUT}/Theme-{k}.dc.html", "w").write(board(k, t))
-json.dump({k: {kk: vv for kk, vv in t.items() if kk not in ("fonts",)} for k, t in THEMES.items()}, open(__import__('os').path.join(__import__('os').path.dirname(__file__), 'theme-tokens.json'), 'w'), indent=1)
-print("wrote", list(THEMES))
+def main(themes, tokens_path=None):
+    failed = False
+    for k, t in themes.items():
+        bad = check(k, t)
+        if bad:
+            failed = True; print("CONTRAST FAIL", k, bad)
+    if failed: sys.exit(1)
+    for k, t in themes.items():
+        open(f"{OUT}/Theme-{k}.dc.html", "w").write(board(k, t))
+    if tokens_path: json.dump({k: {kk: vv for kk, vv in t.items() if kk not in ("fonts",)} for k, t in themes.items()}, open(tokens_path, "w"), indent=1)
+    print("wrote", list(themes))
+
+if __name__ == '__main__':
+    main(THEMES)
