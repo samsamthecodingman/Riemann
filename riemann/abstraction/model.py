@@ -12,12 +12,27 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+class KeyFact(BaseModel):
+    """A striking, specific fact surfaced for a node (see build.py's
+    deterministic validation -- every number-like token in `big`/`detail`
+    must appear in the text of the cited leaves, or the whole KeyFact is
+    dropped)."""
+
+    big: str
+    detail: str
+    cites: list[str] = Field(default_factory=list)
+
+
 class Node(BaseModel):
     """One node in the abstraction tree.
 
     depth increases toward the source (0 = root gist). Leaves carry the
     max depth of their branch, so depth is not uniform across the tree --
     the tree is intentionally ragged (see build.py).
+
+    title/hook/key_points/key_fact/steps are all optional (schema2, see
+    docs/v2-macaron-spec.md §1) so trees cached under the old schema still
+    load -- they simply come back with these fields at their defaults.
     """
 
     id: str
@@ -31,6 +46,11 @@ class Node(BaseModel):
     cites: list[str] = Field(default_factory=list)
     importance: float = 0.5
     atomic: bool = False
+    title: str | None = None
+    hook: str | None = None
+    key_points: list[str] = Field(default_factory=list)
+    key_fact: KeyFact | None = None
+    steps: list[str] = Field(default_factory=list)
 
 
 class Tree(BaseModel):
@@ -45,3 +65,7 @@ class Tree(BaseModel):
     max_depth: int = 0
     status: Literal["building", "done", "error"] = "building"
     provisional_root: bool = False
+    sections: list[str] = Field(default_factory=list)
+    """Node ids at the section level: the first depth from the root with
+    >=2 nodes. Empty for a single-leaf tree or a tree that never branches
+    (a straight chain from root to one leaf). See build.compute_sections."""

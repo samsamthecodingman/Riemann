@@ -15,7 +15,7 @@ import hashlib
 import re
 
 from riemann.abstraction.chunk import TINY_DOC_WORDS, chunk, word_count
-from riemann.abstraction.model import Node, Tree
+from riemann.abstraction.model import KeyFact, Node, Tree
 from riemann.abstraction.summarise import Summariser, parse_json_robustly
 
 RATIO = 3  # compression per step; Forte's practitioner funnel suggests 2.5-4x (weak evidence)
@@ -28,6 +28,18 @@ LEAF_CONTEXT_CHAR_BUDGET = 6000
 LENGTH_TOLERANCE = 0.35
 MAX_BUILD_ROUNDS = 40
 
+# Deterministic validation limits (docs/v2-macaron-spec.md §1): "Truncate
+# or drop; don't retry."
+TITLE_MAX_WORDS = 8
+HOOK_MAX_WORDS = 20
+KEY_POINTS_MAX_ITEMS = 4
+KEY_POINT_MAX_WORDS = 18
+
+# "\d[\d,.]*" (numbers, incl. thousands separators/decimals), "billion",
+# "million", and decades like "1980s" (the trailing "s?" on the digit run
+# covers that last case without a separate alternative).
+_NUMBER_TOKEN_RE = re.compile(r"\d[\d,.]*s?|\bbillion\b|\bmillion\b", re.IGNORECASE)
+
 SYSTEM_SUMMARY_TEMPLATE = """You are compressing part of a document into a shorter summary node for an adaptive-depth abstraction tree.
 Rules:
 - Keep causal connectives (because, therefore, however, ...) that are present in the source.
@@ -36,11 +48,27 @@ Rules:
 - Keep terminology consistent with the children's wording.
 - Target length: about {{TARGET}} words.
 
+Titles (this node's own "title"/"hook", and every value in "child_titles") are punchy but faithful: specific and
+concrete, like a good explainer headline -- never a vague label. They must not claim anything the source doesn't
+say: no clickbait, no questions unless the source itself poses one, no exclamation marks, no emoji. Keep hedges
+("often", "may", "suggests") in titles and hooks where the source has them.
+
 Respond with ONLY JSON, no prose outside it and no markdown code fences:
-{"text": "...", "cites": ["leaf_id", ...], "importance": {"child_id": 0.0}}
+{"text": "...", "cites": ["leaf_id", ...], "importance": {"child_id": 0.0},
+ "title": "2-8 word faithful headline for this node",
+ "hook": "<=20 words, one line: why this part matters",
+ "child_titles": {"child_id": "2-8 word faithful headline for that child"},
+ "key_points": ["2-4 short bullets, each <=18 words, only for a node whose children are sections or paragraphs"],
+ "key_fact": {"big": "the number/finding", "detail": "one short clause of context", "cites": ["leaf_id", ...]},
+ "steps": ["3-6 short labels, only when the content describes a sequence or process"]}
 
 "cites": leaf ids only, drawn from the "Leaf ids you may cite" list below -- the ones this summary's claims actually come from.
-"importance": one entry per id listed in "Child ids" below, 0..1, relative to its siblings, reflecting how much that child matters to the overall point."""
+"importance": one entry per id listed in "Child ids" below, 0..1, relative to its siblings, reflecting how much that child matters to the overall point.
+"child_titles": one entry per id listed in "Child ids" below.
+"key_points": [] when the children aren't sections/paragraphs (e.g. a single atomic block).
+"key_fact": only when the source contains a genuinely striking, specific fact -- otherwise null. Every number in
+"big"/"detail" must actually appear in the cited leaves' text. "cites" here are the leaf ids that support the fact.
+"steps": [] when the content doesn't describe a sequence or process."""
 
 SYSTEM_ROOT_TEMPLATE = SYSTEM_SUMMARY_TEMPLATE + (
     "\n\nThis call produces the ROOT of the tree: state the single most important conclusion or"
@@ -154,6 +182,84 @@ def _build_prompt(nodes: dict[str, Node], child_ids: list[str]) -> tuple[str, li
     lines.append(f"Child ids (in order): {', '.join(child_ids)}")
     lines.append(f"Leaf ids you may cite (in order): {', '.join(leaf_ids)}")
     return "\n".join(lines), leaf_ids
+
+
+def _truncate_words(text: str, max_words: int) -> str:
+    words = text.split()
+    if len(words) <= max_words:
+        return text.strip()
+    return " ".join(words[:max_words]).strip()
+
+
+def _clean_title(raw: object) -> str | None:
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    return _truncate_words(raw.strip(), TITLE_MAX_WORDS)
+
+
+def _clean_hook(raw: object) -> str | None:
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    return _truncate_words(raw.strip(), HOOK_MAX_WORDS)
+
+
+def _clean_key_points(raw: object) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw:
+        if not isinstance(item, str) or not item.strip():
+            continue
+        out.append(_truncate_words(item.strip(), KEY_POINT_MAX_WORDS))
+        if len(out) >= KEY_POINTS_MAX_ITEMS:
+            break
+    return out
+
+
+def _clean_steps(raw: object) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    return [item.strip() for item in raw if isinstance(item, str) and item.strip()]
+
+
+def _clean_child_titles(raw: object, valid_child_ids: list[str]) -> dict[str, str]:
+    """child_titles keys must be actual child ids (deterministic validation)."""
+    if not isinstance(raw, dict):
+        return {}
+    valid = set(valid_child_ids)
+    out: dict[str, str] = {}
+    for child_id, title in raw.items():
+        if child_id not in valid or not isinstance(title, str) or not title.strip():
+            continue
+        out[child_id] = _truncate_words(title.strip(), TITLE_MAX_WORDS)
+    return out
+
+
+def _number_tokens(text: str) -> list[str]:
+    return _NUMBER_TOKEN_RE.findall(text or "")
+
+
+def _validate_key_fact(raw: object, nodes: dict[str, Node], leaf_ctx_ids: list[str]) -> KeyFact | None:
+    """Deterministic validation: every number-like token in big/detail must
+    appear in the text of the cited leaves, or the whole KeyFact is dropped."""
+    if not isinstance(raw, dict):
+        return None
+    big = raw.get("big")
+    detail = raw.get("detail")
+    if not isinstance(big, str) or not big.strip() or not isinstance(detail, str) or not detail.strip():
+        return None
+    big = big.strip()
+    detail = detail.strip()
+
+    cites_raw = raw.get("cites")
+    cites = [c for c in cites_raw if isinstance(c, str) and c in leaf_ctx_ids] if isinstance(cites_raw, list) else []
+    source_text = " ".join(nodes[c].text for c in cites if c in nodes).lower()
+
+    for token in _number_tokens(big) + _number_tokens(detail):
+        if token.lower() not in source_text:
+            return None
+
+    return KeyFact(big=big, detail=detail, cites=cites)
 
 
 def _provisional_prompt(source_text: str, title: str) -> str:
@@ -373,6 +479,13 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
             cites = [c for c in cites_raw if c in leaf_ctx_ids] if isinstance(cites_raw, list) else []
             importance_map = result.get("importance") if isinstance(result.get("importance"), dict) else {}
 
+            title = _clean_title(result.get("title"))
+            hook = _clean_hook(result.get("hook"))
+            key_points = _clean_key_points(result.get("key_points"))
+            steps = _clean_steps(result.get("steps"))
+            key_fact = _validate_key_fact(result.get("key_fact"), nodes, leaf_ctx_ids)
+            child_titles = _clean_child_titles(result.get("child_titles"), group_ids)
+
             span = _span_union(nodes, group_ids)
             nid = _new_id(counter, span)
             parent = Node(
@@ -387,6 +500,11 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
                 cites=cites,
                 importance=1.0,
                 atomic=False,
+                title=title,
+                hook=hook,
+                key_points=key_points,
+                key_fact=key_fact,
+                steps=steps,
             )
             nodes[nid] = parent
             for cid in group_ids:
@@ -396,6 +514,8 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
                         nodes[cid].importance = max(0.0, min(1.0, float(importance_map[cid])))
                     except (TypeError, ValueError):
                         pass
+                if cid in child_titles:
+                    nodes[cid].title = child_titles[cid]
             return nid, parent
 
     current_level = list(leaf_ids)
@@ -460,9 +580,37 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
     tree.nodes = nodes
     tree.max_depth = max(n.depth for n in nodes.values())
     tree.status = "done"
+    tree.sections = compute_sections(tree)
 
     _save(tree)
     await builder._emit("done", {"tree": tree.model_dump()})
+
+
+def compute_sections(tree: Tree) -> list[str]:
+    """Node ids at the section level: the first depth from the root (depth
+    >= 1) that has >=2 nodes, in document order. Empty for a single-leaf
+    tree, or for a tree that never branches (a straight chain from root to
+    one leaf, so no depth ever reaches 2 nodes)."""
+    if tree.root not in tree.nodes:
+        return []
+
+    by_depth: dict[int, list[str]] = {}
+
+    def visit(node_id: str) -> None:
+        node = tree.nodes[node_id]
+        by_depth.setdefault(node.depth, []).append(node_id)
+        for child_id in node.children:
+            if child_id in tree.nodes:
+                visit(child_id)
+
+    visit(tree.root)
+    if not by_depth:
+        return []
+    for depth in range(1, max(by_depth) + 1):
+        candidates = by_depth.get(depth, [])
+        if len(candidates) >= 2:
+            return candidates
+    return []
 
 
 def _save(tree: Tree) -> None:

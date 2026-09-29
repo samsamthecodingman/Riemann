@@ -1,7 +1,21 @@
 import pytest
 
-from riemann.abstraction.build import GIST_WORDS, start_build
+from riemann.abstraction.build import (
+    GIST_WORDS,
+    HOOK_MAX_WORDS,
+    KEY_POINT_MAX_WORDS,
+    KEY_POINTS_MAX_ITEMS,
+    TITLE_MAX_WORDS,
+    _clean_child_titles,
+    _clean_hook,
+    _clean_key_points,
+    _clean_title,
+    _validate_key_fact,
+    compute_sections,
+    start_build,
+)
 from riemann.abstraction.chunk import word_count
+from riemann.abstraction.model import Node, Tree
 from riemann.abstraction.summarise import FakeSummariser
 
 
@@ -116,3 +130,179 @@ async def test_tiny_doc_gives_single_leaf_root_no_summary():
     assert len(tree.nodes) == 1
     assert tree.nodes[tree.root].is_leaf is True
     assert tree.max_depth == 0
+
+
+def _mk_node(id_, depth, children=(), is_leaf=False, text="x", **kw) -> Node:
+    return Node(
+        id=id_,
+        depth=depth,
+        text=text,
+        words=word_count(text),
+        children=list(children),
+        is_leaf=is_leaf,
+        source_span=(0, 1),
+        **kw,
+    )
+
+
+def _mk_tree(nodes: dict, root: str) -> Tree:
+    return Tree(
+        id="t",
+        title="T",
+        source_text="src",
+        source_words=1,
+        root=root,
+        nodes=nodes,
+        max_depth=max(n.depth for n in nodes.values()),
+        status="done",
+    )
+
+
+# --- sections computation ---------------------------------------------
+
+
+def test_sections_first_branching_depth():
+    # root (depth 0) -> two section nodes (depth 1) -> leaves (depth 2)
+    leaf_a = _mk_node("leaf_a", 2, is_leaf=True)
+    leaf_b = _mk_node("leaf_b", 2, is_leaf=True)
+    leaf_c = _mk_node("leaf_c", 2, is_leaf=True)
+    sec1 = _mk_node("sec1", 1, children=["leaf_a"])
+    sec2 = _mk_node("sec2", 1, children=["leaf_b", "leaf_c"])
+    root = _mk_node("root", 0, children=["sec1", "sec2"])
+    tree = _mk_tree({"root": root, "sec1": sec1, "sec2": sec2, "leaf_a": leaf_a, "leaf_b": leaf_b, "leaf_c": leaf_c}, "root")
+    assert compute_sections(tree) == ["sec1", "sec2"]
+
+
+def test_sections_empty_for_chained_root():
+    # root -> mid -> leaf, single child at every depth: no depth ever has >=2 nodes.
+    leaf = _mk_node("leaf", 2, is_leaf=True)
+    mid = _mk_node("mid", 1, children=["leaf"])
+    root = _mk_node("root", 0, children=["mid"])
+    tree = _mk_tree({"root": root, "mid": mid, "leaf": leaf}, "root")
+    assert compute_sections(tree) == []
+
+
+def test_sections_empty_for_single_leaf():
+    leaf = _mk_node("leaf", 0, is_leaf=True)
+    tree = _mk_tree({"leaf": leaf}, "leaf")
+    assert compute_sections(tree) == []
+
+
+async def test_sections_populated_on_real_build():
+    text = _doc(1500)
+    tree = await _build(text, tree_id="sections-real")
+    assert tree.status == "done"
+    if len(tree.nodes) > 1:
+        assert isinstance(tree.sections, list)
+        for node_id in tree.sections:
+            assert node_id in tree.nodes
+
+
+# --- title/hook/key_points propagate through a real build --------------
+
+
+async def test_titles_and_hooks_populated_by_fake_summariser():
+    text = _doc(1500)
+    tree = await _build(text, tree_id="titles")
+    internal = [n for n in tree.nodes.values() if not n.is_leaf]
+    assert internal
+    assert any(n.title for n in internal)
+    assert any(n.hook for n in internal)
+    leaves = [n for n in tree.nodes.values() if n.is_leaf]
+    if len(tree.nodes) > 1:
+        assert any(n.title for n in leaves)
+
+
+# --- key_fact deterministic validation ----------------------------------
+
+
+def test_key_fact_kept_when_number_in_cited_leaf_text():
+    nodes = {"leaf1": _mk_node("leaf1", 1, is_leaf=True, text="Usage grew from hundreds to over 2 billion users by 1995.")}
+    raw = {"big": "2 billion users", "detail": "up from hundreds in 1995", "cites": ["leaf1"]}
+    fact = _validate_key_fact(raw, nodes, ["leaf1"])
+    assert fact is not None
+    assert fact.big == "2 billion users"
+    assert fact.cites == ["leaf1"]
+
+
+def test_key_fact_dropped_when_number_not_in_cited_leaf_text():
+    nodes = {"leaf1": _mk_node("leaf1", 1, is_leaf=True, text="Usage grew steadily over the decade.")}
+    raw = {"big": "2 billion users", "detail": "a huge jump", "cites": ["leaf1"]}
+    fact = _validate_key_fact(raw, nodes, ["leaf1"])
+    assert fact is None
+
+
+def test_key_fact_none_passthrough():
+    assert _validate_key_fact(None, {}, []) is None
+
+
+# --- word-limit enforcement ----------------------------------------------
+
+
+def test_title_truncated_not_retried():
+    long_title = " ".join(f"word{i}" for i in range(20))
+    cleaned = _clean_title(long_title)
+    assert cleaned is not None
+    assert len(cleaned.split()) == TITLE_MAX_WORDS
+
+
+def test_hook_truncated_to_limit():
+    long_hook = " ".join(f"word{i}" for i in range(40))
+    cleaned = _clean_hook(long_hook)
+    assert cleaned is not None
+    assert len(cleaned.split()) == HOOK_MAX_WORDS
+
+
+def test_key_points_truncated_items_and_count():
+    points = [" ".join(f"w{i}" for i in range(30)) for _ in range(10)]
+    cleaned = _clean_key_points(points)
+    assert len(cleaned) == KEY_POINTS_MAX_ITEMS
+    assert all(len(p.split()) == KEY_POINT_MAX_WORDS for p in cleaned)
+
+
+def test_child_titles_keys_must_be_real_child_ids():
+    raw = {"child_a": "A Real Child", "not_a_child": "Should Be Dropped"}
+    cleaned = _clean_child_titles(raw, ["child_a", "child_b"])
+    assert cleaned == {"child_a": "A Real Child"}
+
+
+# --- old-schema JSON still loads ------------------------------------------
+
+
+def test_old_schema_json_still_loads():
+    # A tree dumped by the pre-v2 schema: no sections/title/hook/etc fields.
+    old_json = """
+    {
+        "id": "old1",
+        "title": "Old Tree",
+        "source_text": "hello world",
+        "source_words": 2,
+        "root": "n1",
+        "nodes": {
+            "n1": {
+                "id": "n1",
+                "depth": 0,
+                "text": "hello world",
+                "words": 2,
+                "children": [],
+                "parent": null,
+                "is_leaf": true,
+                "source_span": [0, 11],
+                "cites": [],
+                "importance": 1.0,
+                "atomic": false
+            }
+        },
+        "max_depth": 0,
+        "status": "done",
+        "provisional_root": false
+    }
+    """
+    tree = Tree.model_validate_json(old_json)
+    assert tree.sections == []
+    node = tree.nodes["n1"]
+    assert node.title is None
+    assert node.hook is None
+    assert node.key_points == []
+    assert node.key_fact is None
+    assert node.steps == []

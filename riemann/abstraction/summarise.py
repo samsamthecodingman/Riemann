@@ -220,6 +220,12 @@ class FakeSummariser:
     leaf ids build.py listed via the "Leaf ids you may cite (in order): ..."
     marker line in the prompt. This keeps the adaptive-depth math in
     build.py exercised deterministically without any network access.
+
+    Also emits deterministic `title`, `hook`, `child_titles`, `key_points`
+    and `steps` (derived from the same word list as `text`), so build.py's
+    v2 macaron fields are exercised too. `key_fact` is always null here --
+    tests that need to exercise the key-fact validation path construct
+    their own minimal Summariser stub instead.
     """
 
     def __init__(self, words: int = 20) -> None:
@@ -250,5 +256,21 @@ class FakeSummariser:
             text = "(empty)"
 
         importance = {cid: 0.5 for cid in child_ids}
-        result = {"text": text, "cites": leaf_ids, "importance": importance}
+
+        title = " ".join(words[:5]) if words else "Untitled"
+        hook = " ".join(words[:15]) if words else ""
+        child_titles = {cid: " ".join((f"About {cid}").split()[:8]) for cid in child_ids}
+        key_points = [chunk for chunk in (" ".join(words[i : i + 4]) for i in range(0, min(len(words), 8), 4)) if chunk]
+
+        result = {
+            "text": text,
+            "cites": leaf_ids,
+            "importance": importance,
+            "title": title,
+            "hook": hook,
+            "child_titles": child_titles,
+            "key_points": key_points,
+            "key_fact": None,
+            "steps": [],
+        }
         return json.dumps(result)

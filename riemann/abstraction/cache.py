@@ -25,11 +25,20 @@ def cache_dir() -> Path:
     return trees_dir
 
 
+SCHEMA_VERSION = "schema2"  # v2 macaron fields: title/hook/key_points/key_fact/steps/sections
+
+
 def build_version() -> str:
     """Cache namespace derived from the build parameters, so changing RATIO,
-    leaf size or gist length never serves a tree built under old settings."""
+    leaf size or gist length never serves a tree built under old settings.
+    Also namespaced by SCHEMA_VERSION, so a bump there (e.g. new Node/Tree
+    fields the old prompts never populated) forces a rebuild instead of
+    silently serving stale-shaped trees from the new code path."""
     from riemann.abstraction import build, chunk  # lazy: build imports this module
-    return f"r{build.RATIO}-leaf{chunk.MAX_LEAF_WORDS}-gist{build.GIST_WORDS}-stop{build.GIST_STOP_WORDS}"
+    return (
+        f"r{build.RATIO}-leaf{chunk.MAX_LEAF_WORDS}-gist{build.GIST_WORDS}-stop{build.GIST_STOP_WORDS}"
+        f"-{SCHEMA_VERSION}"
+    )
 
 
 def tree_id_for(text: str) -> str:
