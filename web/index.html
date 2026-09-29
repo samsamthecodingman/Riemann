@@ -48,6 +48,33 @@
   </div>
 </main>
 
+<main id="loading-screen" hidden aria-busy="true">
+  <span id="loading-doc" class="loading-doc"></span>
+  <h1 id="loading-heading">Building your gist</h1>
+  <p class="tagline">This usually takes 20–60 seconds. It opens by itself when it's ready.</p>
+
+  <ol id="loading-steps" class="loading-steps" aria-live="polite">
+    <li data-step="read"><span class="step-dot" aria-hidden="true"></span><span class="step-text">Reading the text</span></li>
+    <li data-step="gist"><span class="step-dot" aria-hidden="true"></span><span class="step-text">Writing a quick gist</span></li>
+    <li data-step="layers"><span class="step-dot" aria-hidden="true"></span><span class="step-text">Summarising, layer by layer</span></li>
+  </ol>
+
+  <div id="loading-gist" class="start-block loading-gist" hidden>
+    <label>Quick gist</label>
+    <p id="loading-gist-text"></p>
+  </div>
+
+  <div id="loading-error" class="start-block loading-error" hidden role="alert">
+    <label>Something went wrong</label>
+    <p id="loading-error-text"></p>
+  </div>
+
+  <div class="start-row loading-actions">
+    <button id="loading-back" class="ghost-btn">&larr; Back</button>
+    <span id="loading-elapsed" class="loading-elapsed"></span>
+  </div>
+</main>
+
 <div id="app">
   <header id="app-header">
     <button id="home-btn" title="Home (z = 0)" aria-label="Home">&#8962;</button>

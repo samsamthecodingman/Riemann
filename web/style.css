@@ -190,6 +190,140 @@ button {
   font-size: 0.9rem;
 }
 
+/* ---------- Loading screen (a build in progress) ---------- */
+
+#loading-screen {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 12vh 16px 4rem;
+}
+
+#loading-screen[hidden] {
+  display: none;
+}
+
+.loading-doc {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--label);
+  margin-bottom: 0.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#loading-screen h1 {
+  font-family: var(--display);
+  font-size: 2rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+  color: var(--text);
+}
+
+#loading-screen .tagline {
+  color: var(--muted);
+  margin-bottom: 2rem;
+  font-size: 1.05rem;
+}
+
+.loading-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.loading-steps li {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+.loading-steps .step-dot {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--panel);
+}
+
+.loading-steps li.active {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.loading-steps li.active .step-dot {
+  border-color: var(--text);
+  background: var(--sec-1);
+  animation: step-pulse 1.1s ease-in-out infinite;
+}
+
+.loading-steps li.done {
+  color: var(--body);
+}
+
+.loading-steps li.done .step-dot {
+  border-color: var(--text);
+  background: var(--text);
+}
+
+.loading-steps li.done .step-text::after {
+  content: " ✓";
+}
+
+@keyframes step-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.35); }
+}
+
+.loading-gist p {
+  font-family: var(--display);
+  font-size: 1.25rem;
+  line-height: 1.4;
+  color: var(--text);
+  margin: 0;
+}
+
+.loading-error p {
+  color: #8F2F22;
+  margin: 0;
+}
+
+.loading-actions {
+  margin-top: 1rem;
+}
+
+.loading-elapsed {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ghost-btn {
+  background: transparent;
+  color: var(--text);
+  border: 1.5px solid var(--text);
+  border-radius: var(--pill);
+  padding: 0.5rem 1.1rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-steps li.active .step-dot {
+    animation: none;
+  }
+}
+
 /* ---------- App shell: Command-centre grid ---------- */
 
 #app {

@@ -1432,44 +1432,108 @@
     };
   }
 
-  function subscribeEvents(treeId) {
-    if (state.eventSource) state.eventSource.close();
-    const es = new EventSource(`/api/tree/${treeId}/events`);
-    state.eventSource = es;
-    const applyNodes = (data) => {
-      if (!data || !data.nodes) return;
-      Object.assign(state.tree.nodes, data.nodes);
-    };
-    es.addEventListener("leaves", (e) => applyNodes(JSON.parse(e.data)));
-    es.addEventListener("provisional_root", (e) => {
-      applyNodes(JSON.parse(e.data));
-      state.tree.provisional_root = true;
-      updateHeader();
-    });
-    es.addEventListener("level", (e) => {
-      applyNodes(JSON.parse(e.data));
-      state.sequence = window.Frontier.buildExpansionSequence(state.tree, state.anchorNodeId || state.tree.root);
-    });
-    es.addEventListener("done", (e) => {
-      const data = JSON.parse(e.data);
-      if (data.nodes) Object.assign(state.tree.nodes, data.nodes);
-      if (data.sections) state.tree.sections = data.sections;
-      state.tree.status = "done";
-      state.tree.provisional_root = false;
-      state.leafIndex = computeLeafIndex(state.tree);
-      state.sequence = window.Frontier.buildExpansionSequence(state.tree, state.anchorNodeId || state.tree.root);
-      const { frontier } = window.Frontier.frontierAtZ(state.tree, state.sequence, state.z);
-      state.frontier = frontier;
-      buildNav();
-      state.lastRailSection = undefined;
-      render({});
-      updateReadout();
-      es.close();
-    });
-    es.addEventListener("error", () => {
-      es.close();
+  // A build in progress shows the loading screen, driven by the build's
+  // SSE stream (the server replays history to late subscribers, so nothing
+  // is missed). The reader opens only once the tree is complete: the
+  // frontier, nav and rail all assume a finished tree.
+  const $loading = el("loading-screen");
+
+  function setLoadingStep(step) {
+    const order = ["read", "gist", "layers"];
+    const idx = order.indexOf(step);
+    $loading.querySelectorAll("#loading-steps li").forEach((li) => {
+      const i = order.indexOf(li.dataset.step);
+      li.classList.toggle("done", i < idx);
+      li.classList.toggle("active", i === idx);
     });
   }
+
+  function stopLoading() {
+    if (state.eventSource) state.eventSource.close();
+    state.eventSource = null;
+    clearInterval(state.loadingTimer);
+    state.loadingTimer = null;
+  }
+
+  function showStartScreen() {
+    stopLoading();
+    $loading.hidden = true;
+    $app.classList.remove("active");
+    $startScreen.style.display = "";
+    loadRecent();
+  }
+
+  function showLoading(treeId, title) {
+    stopLoading();
+    $startScreen.style.display = "none";
+    $app.classList.remove("active");
+    $loading.hidden = false;
+    $loading.setAttribute("aria-busy", "true");
+    el("loading-doc").textContent = title || "";
+    el("loading-heading").textContent = "Building your gist";
+    el("loading-gist").hidden = true;
+    el("loading-error").hidden = true;
+    setLoadingStep("read");
+
+    const startedAt = Date.now();
+    const $elapsed = el("loading-elapsed");
+    const tick = () => { $elapsed.textContent = `${Math.round((Date.now() - startedAt) / 1000)} s`; };
+    tick();
+    state.loadingTimer = setInterval(tick, 1000);
+
+    let summaries = 0;
+    let finished = false;
+    const layersText = $loading.querySelector('[data-step="layers"] .step-text');
+    layersText.textContent = "Summarising, layer by layer";
+
+    const es = new EventSource(`/api/tree/${treeId}/events`);
+    state.eventSource = es;
+    es.addEventListener("leaves", (e) => {
+      const n = (JSON.parse(e.data).nodes || []).length;
+      $loading.querySelector('[data-step="read"] .step-text').textContent =
+        `Read the text: ${n} passage${n === 1 ? "" : "s"}`;
+      setLoadingStep("gist");
+    });
+    es.addEventListener("provisional_root", (e) => {
+      const node = JSON.parse(e.data).node;
+      if (node && node.text) {
+        el("loading-gist-text").textContent = node.text;
+        el("loading-gist").hidden = false;
+      }
+      setLoadingStep("layers");
+    });
+    es.addEventListener("level", (e) => {
+      summaries += (JSON.parse(e.data).nodes || []).length;
+      layersText.textContent = `Summarising, layer by layer: ${summaries} written`;
+      setLoadingStep("layers");
+    });
+    es.addEventListener("done", (e) => {
+      finished = true;
+      const tree = JSON.parse(e.data).tree;
+      stopLoading();
+      $loading.hidden = true;
+      $loading.setAttribute("aria-busy", "false");
+      if (tree) openTree(tree, { forceFresh: true });
+    });
+    es.addEventListener("error", (e) => {
+      if (finished) return;
+      // A named "error" event from the server carries data; a bare
+      // connection error doesn't (EventSource would retry, but a dropped
+      // stream here means the server went away).
+      let msg = "Lost the connection to the Riemann server. Is it still running?";
+      if (e.data) {
+        try { msg = JSON.parse(e.data).message || msg; } catch (_) {}
+      }
+      stopLoading();
+      $loading.setAttribute("aria-busy", "false");
+      el("loading-heading").textContent = "The build stopped";
+      el("loading-error-text").textContent = msg;
+      el("loading-error").hidden = false;
+      $loading.querySelectorAll("#loading-steps li.active").forEach((li) => li.classList.remove("active"));
+    });
+  }
+
+  el("loading-back").addEventListener("click", showStartScreen);
 
   // ---------------------------------------------------------------------
   // Start screen wiring
@@ -1480,34 +1544,50 @@
     $err.hidden = false;
   }
 
-  async function submitAbstract(body, isMultipart) {
+  async function submitAbstract(body, isMultipart, $btn) {
+    el("paste-error").hidden = true;
+    const label = $btn ? $btn.textContent : null;
+    if ($btn) { $btn.disabled = true; $btn.textContent = "Starting…"; }
     try {
       const resp = await fetch("/api/abstract", isMultipart ? { method: "POST", body } : {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!resp.ok) throw new Error("request failed");
+      if (!resp.ok) {
+        let detail = "";
+        try { detail = (await resp.json()).detail || ""; } catch (_) {}
+        throw new Error(detail || "Could not build that. Try again.");
+      }
       const data = await resp.json();
-      const treeResp = await fetch(`/api/tree/${data.tree_id}`);
-      const tree = await treeResp.json();
-      openTree(tree, { forceFresh: true });
-      subscribeEvents(data.tree_id);
+      await openTreeById(data.tree_id);
     } catch (err) {
-      showStartError("Could not build that. Try again.");
+      console.error(err);
+      showStartScreen();
+      showStartError(err.message || "Could not build that. Try again.");
+    } finally {
+      if ($btn) { $btn.disabled = false; $btn.textContent = label; }
     }
+  }
+
+  async function openTreeById(treeId) {
+    const resp = await fetch(`/api/tree/${treeId}`);
+    if (!resp.ok) throw new Error("Could not load that document.");
+    const tree = await resp.json();
+    if (tree.status === "done") openTree(tree);
+    else showLoading(tree.id, tree.title);
   }
 
   el("paste-submit").addEventListener("click", () => {
     const text = el("paste-text").value.trim();
     if (!text) return showStartError("Paste some text first.");
-    submitAbstract({ text });
+    submitAbstract({ text }, false, el("paste-submit"));
   });
 
   el("url-submit").addEventListener("click", () => {
     const url = el("url-input").value.trim();
     if (!url) return showStartError("Enter a URL first.");
-    submitAbstract({ url });
+    submitAbstract({ url }, false, el("url-submit"));
   });
 
   el("file-input").addEventListener("change", (e) => {
@@ -1530,15 +1610,16 @@
         .map((it) => `<li><a href="#" data-tree-id="${it.id}">${escapeHtml(it.title)}</a></li>`)
         .join("");
       el("recent-block").hidden = false;
-      $list.addEventListener("click", async (e) => {
+      $list.onclick = async (e) => {
         const a = e.target.closest("[data-tree-id]");
         if (!a) return;
         e.preventDefault();
-        const resp2 = await fetch(`/api/tree/${a.dataset.treeId}`);
-        const tree = await resp2.json();
-        openTree(tree);
-        if (tree.status !== "done") subscribeEvents(tree.id);
-      });
+        try {
+          await openTreeById(a.dataset.treeId);
+        } catch (err) {
+          showStartError(err.message);
+        }
+      };
     } catch (e) {}
   }
 
