@@ -50,7 +50,8 @@ Rules:
 
 Titles (this node's own "title"/"hook", and every value in "child_titles") are punchy but faithful: specific and
 concrete, like a good explainer headline -- never a vague label. They must not claim anything the source doesn't
-say: no clickbait, no questions unless the source itself poses one, no exclamation marks, no emoji. Keep hedges
+say: no clickbait, no questions unless the source itself poses one, no exclamation marks, no emoji. Write titles in
+sentence case (capitalise only the first word, proper nouns and acronyms), e.g. "When a site won't load, suspect DNS". Keep hedges
 ("often", "may", "suggests") in titles and hooks where the source has them.
 
 Respond with ONLY JSON, no prose outside it and no markdown code fences:

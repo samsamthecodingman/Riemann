@@ -25,7 +25,7 @@ def cache_dir() -> Path:
     return trees_dir
 
 
-SCHEMA_VERSION = "schema2"  # v2 macaron fields: title/hook/key_points/key_fact/steps/sections
+SCHEMA_VERSION = "schema3"  # bump whenever prompts or node fields change  # v2 macaron fields: title/hook/key_points/key_fact/steps/sections
 
 
 def build_version() -> str:
