@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Macaron with a customisable pastel palette</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&amp;family=Work+Sans:wght@400;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Work Sans',sans-serif;background:#FBF7F2}
+a{color:#2A2521}a:hover{color:#2A2521}
+</style>
+</helmet>
+<div style="width: 1600px; height: 900px; box-sizing: border-box; background: #FBF7F2; display: grid; grid-template-columns: 300px minmax(0, 1fr) 380px; grid-template-rows: 72px minmax(0, 1fr); font-family: 'Work Sans', sans-serif; color: #2A2521; position: relative">
+
+<header style="grid-column: 1 / 4; display: flex; align-items: center; gap: 18px; padding: 0 32px; background: #FFFDFA; border-bottom: 1px solid #ECE4D8">
+<button type="button" aria-label="Back to the gist" style="width: 44px; height: 44px; border-radius: 12px; border: 1px solid #ECE4D8; background: #F3EEE6; color: #2A2521; font-size: 18px">⌂</button>
+<div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+<span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: #6B6157">HOW THE INTERNET ACTUALLY MOVES YOUR DATA</span>
+<span style="font-family: 'Fraunces', serif; font-size: 17px; color: #2A2521; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Turn “the internet is broken” into a specific, answerable question.</span>
+</div>
+<div style="flex-grow: 1"></div>
+<button type="button" aria-pressed="{{ panelOpenStr }}" onClick="{{ togglePanel }}" style="{{ paletteBtnStyle }}">
+<span aria-hidden="true" style="display: flex; gap: 3px">
+<span style="{{ miniDot0 }}"></span><span style="{{ miniDot1 }}"></span><span style="{{ miniDot2 }}"></span>
+</span>
+Palette
+</button>
+<div style="display: flex; align-items: center; gap: 6px; padding: 6px; border-radius: 999px; background: #F3EEE6; border: 1px solid #ECE4D8">
+<button type="button" aria-label="Less detail" style="height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid #ECE4D8; background: #FFFDFA; color: #2A2521; font-family: 'Work Sans', sans-serif; font-size: 14px; font-weight: 600">− Less</button>
+<span style="font-size: 13px; color: #5E554C; padding: 0 6px">~3 min · 49% of original</span>
+<button type="button" aria-label="More detail" style="height: 36px; padding: 0 14px; border-radius: 999px; border: none; background: #2A2521; color: #FFFDFA; font-family: 'Work Sans', sans-serif; font-size: 14px; font-weight: 700">More +</button>
+</div>
+</header>
+
+<nav aria-label="Sections" style="padding: 28px 20px 28px 32px; display: flex; flex-direction: column; gap: 6px; border-right: 1px solid #ECE4D8; background: #FFFDFA; font-size: 15px">
+<span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: #6B6157; padding: 0 12px 8px">SECTIONS</span>
+<sc-for list="{{ navItems }}" as="item" hint-placeholder-count="5">
+<a href="#" style="{{ item.style }}"><span aria-hidden="true" style="{{ item.dotStyle }}"></span><span style="font-weight: 700; color: #6B6157">{{ item.n }}</span><span>{{ item.title }}</span></a>
+</sc-for>
+<div style="flex-grow: 1"></div>
+<p style="margin: 0; padding: 12px; font-size: 13px; line-height: 1.5; color: #5E554C">Hold <strong style="color: #2A2521">Z</strong> and move the mouse over any passage to open it up or fold it away.</p>
+</nav>
+
+<main style="overflow: hidden; padding: 36px 48px 0; display: flex; flex-direction: column; gap: 18px; position: relative">
+<span style="font-size: 13px; font-weight: 700; letter-spacing: 0.1em; color: #6B6157"><span style="{{ kickerStyle }}">03</span> · NAMES &amp; RELIABILITY</span>
+<h1 style="margin: 0; font-family: 'Fraunces', serif; font-size: 46px; line-height: 1.1; font-weight: 600; color: #2A2521">When a site won't load, suspect DNS</h1>
+<p style="margin: 0; font-size: 19px; line-height: 1.55; color: #5E554C; max-width: 780px">Names become addresses through a hierarchy, and TCP makes delivery reliable on top of an IP layer that promises nothing.</p>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 36px; margin-top: 8px">
+<section style="display: flex; flex-direction: column; gap: 10px; position: relative">
+<h2 style="margin: 0; font-size: 17px; font-weight: 700; color: #2A2521">Names → numbers</h2>
+<sc-if value="{{ toolbarOpen }}" hint-placeholder-val="{{ true }}">
+<div role="toolbar" aria-label="Highlight colour" style="position: absolute; left: 60px; top: 148px; z-index: 3; display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-radius: 999px; background: #FFFFFF; border: 1px solid #ECE4D8; box-shadow: 0 10px 28px rgba(42,37,33,0.14)">
+<sc-for list="{{ toolbarSwatches }}" as="sw" hint-placeholder-count="6">
+<button type="button" aria-label="{{ sw.label }}" aria-pressed="{{ sw.pressed }}" onClick="{{ sw.pick }}" style="{{ sw.style }}"></button>
+</sc-for>
+<span style="width: 1px; height: 22px; background: #ECE4D8; margin: 0 4px"></span>
+<button type="button" onClick="{{ removeA }}" style="height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid #ECE4D8; background: #FFFDFA; color: #2A2521; font-family: 'Work Sans', sans-serif; font-size: 13px; font-weight: 600">Remove</button>
+</div>
+</sc-if>
+<p style="margin: 0; font-size: 17px; line-height: 1.65; color: #38312B">Nobody wants to type a string of numbers to visit a website, so the internet layers a naming system, the Domain Name System or DNS, on top of raw IP addresses. When you type a domain name into a browser, your computer asks a DNS resolver to translate that name into an IP address before any connection can be made. This lookup is usually invisible and fast, cached at several levels, but it is also a common point of failure: <mark style="{{ markAStyle }}">if DNS is broken or blocked, a website can be completely unreachable even though the server hosting it is running fine.</mark></p>
+</section>
+<section style="display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 17px; font-weight: 700; color: #2A2521">A hierarchy, so no server stores everything</h2>
+<p style="margin: 0; font-size: 17px; line-height: 1.65; color: #38312B">DNS is organized as a hierarchy. At the top are root servers that know which servers are authoritative for each top-level domain, such as .com or .org. Those servers in turn know which servers are authoritative for individual domains, and so on down to the specific record for a given subdomain. This structure means no single server needs to store the whole internet's worth of names, and <mark style="{{ markBStyle }}">it is part of why the naming system has scaled from a few hundred hosts in the 1980s to billions of names today.</mark></p>
+</section>
+</div>
+</main>
+
+<aside style="padding: 36px 32px 0 0; display: flex; flex-direction: column; gap: 16px; overflow: hidden">
+<div style="{{ keyFactStyle }}">
+<span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: #5A4E3F">KEY FACT</span>
+<span style="font-family: 'Fraunces', serif; font-size: 34px; font-weight: 600; line-height: 1.1">Hundreds → billions</span>
+<span style="font-size: 14px; line-height: 1.5; color: #3E362E">DNS grew from a few hundred hosts in the 1980s to billions of names today.</span>
+</div>
+<div style="background: #FFFDFA; border: 1px solid #ECE4D8; border-radius: 20px; padding: 20px 24px; display: flex; flex-direction: column; gap: 12px">
+<span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: #6B6157">HOW A NAME IS FOUND</span>
+<div style="display: flex; flex-direction: column; gap: 8px; font-size: 14px; color: #2A2521">
+<span style="{{ flowStyle }}">Root servers</span>
+<span style="padding-left: 12px; color: #5E554C">↓</span>
+<span style="{{ flowStyle }}">.com / .org servers</span>
+<span style="padding-left: 12px; color: #5E554C">↓</span>
+<span style="{{ flowEndStyle }}">The domain's own servers → the record</span>
+</div>
+</div>
+<div style="background: #FFFDFA; border: 1px solid #ECE4D8; border-radius: 20px; padding: 20px 24px; display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: #6B6157">UP NEXT · 04</span>
+<span style="font-family: 'Fraunces', serif; font-size: 21px; font-weight: 600; color: #2A2521">Speed vs. certainty</span>
+<span style="font-size: 14px; line-height: 1.5; color: #5E554C">UDP drops late packets instead of waiting; TLS encrypts and verifies who you're talking to.</span>
+</div>
+</aside>
+
+<sc-if value="{{ panelOpen }}" hint-placeholder-val="{{ true }}">
+<section aria-label="Palette" style="position: absolute; right: 24px; top: 84px; z-index: 5; width: 420px; box-sizing: border-box; background: #FFFDFA; border: 1px solid #ECE4D8; border-radius: 22px; box-shadow: 0 18px 44px rgba(42,37,33,0.16); padding: 22px 24px; display: flex; flex-direction: column; gap: 18px">
+<div style="display: flex; align-items: center; justify-content: space-between">
+<h2 style="margin: 0; font-family: 'Fraunces', serif; font-size: 24px; font-weight: 600">Your palette</h2>
+<button type="button" aria-label="Close palette" onClick="{{ togglePanel }}" style="width: 44px; height: 44px; border-radius: 999px; border: 1px solid #ECE4D8; background: #F3EEE6; color: #2A2521; font-size: 16px">✕</button>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 10px">
+<span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: #6B6157">PRESETS</span>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{ presets }}" as="p" hint-placeholder-count="4">
+<button type="button" onClick="{{ p.pick }}" aria-pressed="{{ p.pressed }}" style="{{ p.style }}">
+<span aria-hidden="true" style="display: flex; gap: 3px"><span style="{{ p.d0 }}"></span><span style="{{ p.d1 }}"></span><span style="{{ p.d2 }}"></span><span style="{{ p.d3 }}"></span><span style="{{ p.d4 }}"></span></span>
+<span>{{ p.name }}</span>
+</button>
+</sc-for>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 10px">
+<span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: #6B6157">SECTION COLOURS · PICK A SLOT, THEN A COLOUR</span>
+<div style="display: flex; gap: 8px">
+<sc-for list="{{ slots }}" as="s" hint-placeholder-count="5">
+<button type="button" onClick="{{ s.pick }}" aria-pressed="{{ s.pressed }}" aria-label="{{ s.label }}" style="{{ s.style }}">{{ s.n }}</button>
+</sc-for>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 10px">
+<span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: #6B6157">{{ swatchHeading }}</span>
+<div style="display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{ swatches }}" as="sw" hint-placeholder-count="16">
+<button type="button" onClick="{{ sw.pick }}" aria-label="{{ sw.label }}" aria-pressed="{{ sw.pressed }}" title="{{ sw.label }}" style="{{ sw.style }}"></button>
+</sc-for>
+</div>
+<div style="display: flex; gap: 8px">
+<button type="button" onClick="{{ modeHighlight }}" aria-pressed="{{ hlModeStr }}" style="{{ hlModeStyle }}">
+<span aria-hidden="true" style="{{ hlDot }}"></span>Highlighter colour
+</button>
+<button type="button" onClick="{{ modeSections }}" aria-pressed="{{ secModeStr }}" style="{{ secModeStyle }}">Section colour</button>
+</div>
+</div>
+
+<p style="margin: 0; font-size: 13px; line-height: 1.5; color: #5E554C">To add a highlight, select any text and choose a colour from the little toolbar. Click an existing highlight to recolour or remove it.</p>
+</section>
+</sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1600,"height":900}}'>
+class Component extends DCLogic {
+constructor(props) {
+super(props);
+this.state = {
+panelOpen: true,
+toolbarOpen: true,
+mode: 'highlight',
+slot: 2,
+sections: ['#F6D5D1', '#D5E6CF', '#F7E8B5', '#D3E4F2', '#E2D8F0'],
+hl: '#F9D3E3',
+hlA: '#F7E8B5',
+hlB: '#F9D3E3',
+preset: 'Macaron'
+};
+}
+renderVals() {
+const s = this.state;
+const PALETTE = [
+['Blush', '#F6D5D1'], ['Pastel pink', '#F9D3E3'], ['Rose quartz', '#F3C6D3'], ['Candy floss', '#FBDDEB'],
+['Peach', '#FBDCC8'], ['Apricot', '#F8E0B8'], ['Butter', '#F7E8B5'], ['Lemon', '#F5F0B8'],
+['Pistachio', '#E1ECCB'], ['Sage', '#D5E6CF'], ['Mint', '#D2EBDD'], ['Seafoam', '#CFE8E1'],
+['Sky', '#D3E4F2'], ['Periwinkle', '#D9DDF4'], ['Lavender', '#E2D8F0'], ['Lilac', '#EBD9F0']
+];
+const PRESETS = [
+['Macaron', ['#F6D5D1', '#D5E6CF', '#F7E8B5', '#D3E4F2', '#E2D8F0'], '#F7E8B5'],
+['Pink party', ['#F9D3E3', '#F3C6D3', '#FBDDEB', '#F6D5D1', '#EBD9F0'], '#F9D3E3'],
+['Garden', ['#E1ECCB', '#D5E6CF', '#F5F0B8', '#FBDCC8', '#D2EBDD'], '#F5F0B8'],
+['Sky & lilac', ['#D3E4F2', '#D9DDF4', '#E2D8F0', '#CFE8E1', '#EBD9F0'], '#D9DDF4']
+];
+const TITLES = ['Not one pipe, but a mesh', 'Why your video call stutters', "When a site won't load, suspect DNS", 'Speed vs. certainty', 'Diagnose it yourself'];
+const dot = (c, size) => `display: block; width: ${size}px; height: ${size}px; border-radius: 999px; background: ${c}; box-shadow: inset 0 0 0 1px rgba(42,37,33,0.14)`;
+const mark = (c) => `color: #2A2521; background: linear-gradient(transparent 50%, ${c} 50%); padding: 0 2px; border-radius: 2px`;
+const setSection = (i, c) => { const next = s.sections.slice(); next[i] = c; this.setState({ sections: next, preset: null }); };
+const pickBtn = (on) => `display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 12px; border-radius: 14px; border: ${on ? '2px solid #2A2521' : '1px solid #ECE4D8'}; background: #FFFDFA; color: #2A2521; font-family: 'Work Sans', sans-serif; font-size: 14px; font-weight: 600; cursor: pointer`;
+const modeBtn = (on) => `display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px; border-radius: 999px; border: ${on ? '2px solid #2A2521' : '1px solid #ECE4D8'}; background: ${on ? '#F3EEE6' : '#FFFDFA'}; color: #2A2521; font-family: 'Work Sans', sans-serif; font-size: 14px; font-weight: 600; cursor: pointer`;
+const target = s.mode === 'highlight' ? s.hl : s.sections[s.slot];
+return {
+panelOpen: s.panelOpen,
+panelOpenStr: s.panelOpen ? 'true' : 'false',
+toolbarOpen: s.toolbarOpen,
+togglePanel: () => this.setState({ panelOpen: !s.panelOpen }),
+paletteBtnStyle: `display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 16px; border-radius: 999px; border: ${s.panelOpen ? '2px solid #2A2521' : '1px solid #ECE4D8'}; background: #FFFDFA; color: #2A2521; font-family: 'Work Sans', sans-serif; font-size: 14px; font-weight: 600; cursor: pointer`,
+miniDot0: dot(s.sections[0], 12), miniDot1: dot(s.sections[2], 12), miniDot2: dot(s.hl, 12),
+navItems: TITLES.map((title, i) => ({
+n: String(i + 1).padStart(2, '0'), title,
+style: i === 2
+? `display: flex; gap: 12px; padding: 12px; border-radius: 12px; text-decoration: none; color: #2A2521; background: ${s.sections[i]}; font-weight: 600`
+: 'display: flex; gap: 12px; padding: 12px; border-radius: 12px; text-decoration: none; color: #38312B',
+dotStyle: i === 2 ? 'display: none' : `width: 10px; height: 10px; margin-top: 6px; flex-shrink: 0; border-radius: 999px; background: ${s.sections[i]}; box-shadow: inset 0 0 0 1px #ECE4D8`
+})),
+kickerStyle: `padding: 4px 10px; border-radius: 999px; background: ${s.sections[2]}; color: #2A2521`,
+keyFactStyle: `background: ${s.sections[2]}; color: #2A2521; border-radius: 20px; padding: 22px 24px; display: flex; flex-direction: column; gap: 6px`,
+flowStyle: `padding: 8px 12px; border-radius: 8px; background: ${s.sections[3]}`,
+flowEndStyle: `padding: 8px 12px; border-radius: 8px; background: ${s.sections[2]}; font-weight: 600`,
+markAStyle: s.hlA ? mark(s.hlA) : 'background: none; color: inherit',
+markBStyle: s.hlB ? mark(s.hlB) : 'background: none; color: inherit',
+removeA: () => this.setState({ hlA: null, toolbarOpen: false }),
+toolbarSwatches: PALETTE.filter((_, i) => [0, 1, 2, 6, 9, 12, 14].includes(i)).map(([label, c]) => ({
+label: `Recolour highlight: ${label}`, pressed: s.hlA === c ? 'true' : 'false',
+style: `width: 30px; height: 30px; border-radius: 999px; background: ${c}; cursor: pointer; border: ${s.hlA === c ? '2px solid #2A2521' : '1px solid rgba(42,37,33,0.18)'}`,
+pick: () => this.setState({ hlA: c })
+})),
+presets: PRESETS.map(([name, secs, hl]) => ({
+name, pressed: s.preset === name ? 'true' : 'false', style: pickBtn(s.preset === name),
+d0: dot(secs[0], 12), d1: dot(secs[1], 12), d2: dot(secs[2], 12), d3: dot(secs[3], 12), d4: dot(secs[4], 12),
+pick: () => this.setState({ sections: secs.slice(), hl, hlA: s.hlA ? hl : null, preset: name })
+})),
+slots: s.sections.map((c, i) => ({
+n: String(i + 1).padStart(2, '0'), label: `Section ${i + 1} colour`,
+pressed: s.mode === 'sections' && s.slot === i ? 'true' : 'false',
+style: `width: 64px; height: 44px; border-radius: 12px; background: ${c}; color: #2A2521; font-family: 'Work Sans', sans-serif; font-size: 13px; font-weight: 700; cursor: pointer; border: ${s.mode === 'sections' && s.slot === i ? '2px solid #2A2521' : '1px solid rgba(42,37,33,0.14)'}`,
+pick: () => this.setState({ slot: i, mode: 'sections' })
+})),
+swatchHeading: s.mode === 'highlight' ? 'PASTELS · CHOOSING THE HIGHLIGHTER COLOUR' : `PASTELS · CHOOSING SECTION ${String(s.slot + 1).padStart(2, '0')}'S COLOUR`,
+swatches: PALETTE.map(([label, c]) => ({
+label, pressed: target === c ? 'true' : 'false',
+style: `width: 100%; aspect-ratio: 1; border-radius: 12px; background: ${c}; cursor: pointer; border: ${target === c ? '2px solid #2A2521' : '1px solid rgba(42,37,33,0.14)'}`,
+pick: () => (s.mode === 'highlight' ? this.setState({ hl: c, hlB: c, preset: null }) : setSection(s.slot, c))
+})),
+modeHighlight: () => this.setState({ mode: 'highlight' }),
+modeSections: () => this.setState({ mode: 'sections' }),
+hlModeStr: s.mode === 'highlight' ? 'true' : 'false',
+secModeStr: s.mode === 'sections' ? 'true' : 'false',
+hlModeStyle: modeBtn(s.mode === 'highlight'),
+secModeStyle: modeBtn(s.mode === 'sections'),
+hlDot: dot(s.hl, 14)
+};
+}
+}
+</script>
+</body>
+</html>
