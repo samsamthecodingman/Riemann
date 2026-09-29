@@ -90,6 +90,7 @@ def expansion_sequence(
     tree: Tree,
     anchor_id: str | None = None,
     start_frontier: set[str] | None = None,
+    keep_expanded: set[str] | None = None,
 ) -> list[str]:
     """Compute the full ordered expansion sequence from a starting frontier.
 
@@ -97,16 +98,26 @@ def expansion_sequence(
     (i.e. no particular anchor -- ties broken purely by importance/depth).
     start_frontier: the frontier to start expanding from. Defaults to
     ``{tree.root}``, i.e. the sequence for a fresh dial at z=0.
+    keep_expanded: nodes that are expanded right now. They go first (still
+    parents-first, nearest-first among themselves), so re-anchoring keeps
+    the page exactly as it is: frontier_at(seq, len(keep_expanded)) is the
+    current frontier, and the next step in either direction changes one
+    node. Must be closed under ancestors (any valid frontier's expanded set
+    is).
     """
     anchor = anchor_id or tree.root
     frontier = set(start_frontier) if start_frontier is not None else {tree.root}
+    keep = keep_expanded or set()
     sequence: list[str] = []
 
     while True:
         candidates = [nid for nid in frontier if not tree.nodes[nid].is_leaf]
         if not candidates:
             break
-        best = min(candidates, key=lambda nid: _priority_key(tree, nid, anchor))
+        best = min(
+            candidates,
+            key=lambda nid: (0 if nid in keep else 1,) + _priority_key(tree, nid, anchor),
+        )
         sequence.append(best)
         frontier.discard(best)
         frontier.update(tree.nodes[best].children)

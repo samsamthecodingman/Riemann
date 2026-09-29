@@ -67,7 +67,6 @@
   const $docHook = el("doc-hook");
   const $dial = el("dial");
   const $liveRegion = el("live-region");
-  const $popover = el("source-popover");
   const $resumeCard = el("resume-card");
   const $resumeCardText = el("resume-card-text");
   const $zoomHint = el("zoom-hint");
@@ -294,13 +293,36 @@
     return state.frontier[0] || state.tree.root;
   }
 
+  // A new anchor reorders future expansions around it, but must not change
+  // what's on screen: the currently expanded nodes stay first in the new
+  // sequence and z is re-expressed against it, so the next step changes
+  // exactly one passage instead of reshuffling the page.
+  function sequenceKeepingPage(anchorId) {
+    const nodes = state.tree.nodes;
+    if (!state.frontier || !state.frontier.length) {
+      return window.Frontier.buildExpansionSequence(state.tree, anchorId);
+    }
+    const keep = new Set();
+    for (const id of state.frontier) {
+      let p = nodes[id] && nodes[id].parent;
+      while (p && !keep.has(p)) {
+        keep.add(p);
+        p = nodes[p].parent;
+      }
+    }
+    const seq = window.Frontier.buildExpansionSequence(state.tree, anchorId, keep);
+    if (seq.length) state.z = keep.size / seq.length;
+    return seq;
+  }
+
   function setAnchor(nodeId) {
     const prev = state.anchorNodeId;
     state.anchorNodeId = nodeId;
+    state.pinMode = "point";
     const n = state.tree.nodes[nodeId];
     state.anchorOffset = n ? (n.source_span[0] + n.source_span[1]) / 2 : null;
     if (prev !== nodeId) {
-      state.sequence = window.Frontier.buildExpansionSequence(state.tree, nodeId);
+      state.sequence = sequenceKeepingPage(nodeId);
       handleDwellChange(nodeId);
       updateNavCurrent();
       updateRail();
@@ -504,13 +526,18 @@
     const html = window.marked ? window.marked.parse(node.text || "") : `<p>${escapeHtml(node.text || "")}</p>`;
     const isLeaf = node.is_leaf;
     const cls = ["node", isLeaf ? "leaf" : "summary", node.atomic ? "atomic" : ""].filter(Boolean).join(" ");
-    const bodyCls = isLeaf ? "node-body" : "node-body source-hint";
     const prov = nodeProvenance(node);
+    // Summaries link to their original text via the small ¶ label only (the
+    // whole body used to be a hover target, which popped a bubble mid-zoom
+    // that never closed because its element was replaced under the pointer).
+    const provHTML = !prov
+      ? ""
+      : isLeaf || !(node.cites && node.cites.length)
+        ? `<span class="provenance">${escapeHtml(prov)}</span>`
+        : `<button type="button" class="provenance source-link" title="Read the original text">${escapeHtml(prov)}<span class="source-link-more"> · original</span></button>`;
     return `<div class="${cls}" data-node-id="${node.id}">
-      <div class="node-head"><h2 class="node-title">${escapeHtml(nodeTitle(node))}</h2>${
-      prov ? `<span class="provenance">${escapeHtml(prov)}</span>` : ""
-    }</div>
-      <div class="${bodyCls}">${html}</div>
+      <div class="node-head"><h2 class="node-title">${escapeHtml(nodeTitle(node))}</h2>${provHTML}</div>
+      <div class="node-body">${html}</div>
     </div>`;
   }
 
@@ -898,9 +925,9 @@
       if (h) showHighlightToolbar(mark.getBoundingClientRect(), { mode: "edit", id: h.id, colour: h.colour });
       return;
     }
-    const hint = e.target.closest(".source-hint");
-    if (!hint) return;
-    const nodeEl = hint.closest("[data-node-id]");
+    const link = e.target.closest(".source-link");
+    if (!link) return;
+    const nodeEl = link.closest("[data-node-id]");
     const node = state.tree.nodes[nodeEl.dataset.nodeId];
     if (!node || !node.cites || node.cites.length === 0) return;
     jumpToLeaf(node.cites[0]);
@@ -1050,7 +1077,7 @@
     let beforeY = forcedBeforeY;
     if (beforeY == null) {
       const anchorEl = $content.querySelector(`[data-node-id="${state.anchorNodeId}"]`);
-      beforeY = anchorEl ? yOfOffset(state.anchorNodeId, anchorEl.getBoundingClientRect(), state.anchorOffset) : null;
+      beforeY = anchorEl ? pinY(state.anchorNodeId, anchorEl.getBoundingClientRect(), state.anchorOffset) : null;
     }
 
     state.z = clamped;
@@ -1066,9 +1093,10 @@
         const replacement = window.Frontier.findFrontierNodeAtOffset(state.tree, state.frontier, offset);
         if (replacement) {
           state.anchorNodeId = replacement;
+          if (state.pinActive) markPinned(replacement);
           const afterRect = lastRenderRects.get(replacement);
           if (afterRect && beforeY != null) {
-            const delta = yOfOffset(replacement, afterRect, offset) - beforeY;
+            const delta = pinY(replacement, afterRect, offset) - beforeY;
             const deficit = -(window.scrollY + delta);
             if (deficit > 0) {
               topSpacerPx += deficit;
@@ -1097,6 +1125,22 @@
     }
   }
 
+  // Zoom pin. A gesture pins the passage under the pointer by its top edge
+  // (its subheading): that edge holds its screen position for the whole
+  // gesture, and whichever block contains the pinned source position after
+  // each step takes its place, outlined so you can see what's pinned. A
+  // summary therefore unfolds downward from its own heading, and zooming
+  // out folds back up into the heading that contains it. If that heading
+  // is already scrolled off the top, pin the exact spot under the pointer
+  // instead so the line being read doesn't move.
+  function contentTopY() {
+    const hb = el("app-header").getBoundingClientRect().bottom;
+    const nb = $sectionNav.getBoundingClientRect();
+    // On narrow screens the nav is a sticky pill row under the header.
+    const navIsRow = nb.width > window.innerWidth * 0.6 && nb.height > 0 && nb.top <= hb + 1;
+    return (navIsRow ? nb.bottom : hb) + 8;
+  }
+
   function beginPointerGesture(px, py) {
     let x = px;
     let y = py;
@@ -1115,8 +1159,45 @@
     }
     if (anchorId && anchorId !== state.anchorNodeId) setAnchor(anchorId);
     const elAnchor = anchorId && $content.querySelector(`[data-node-id="${anchorId}"]`);
-    if (elAnchor) state.anchorOffset = offsetAtY(anchorId, elAnchor.getBoundingClientRect(), anchorY);
+    if (!elAnchor) return anchorY;
+    const rect = elAnchor.getBoundingClientRect();
+    const node = state.tree.nodes[anchorId];
+    showPin(anchorId);
+    if (rect.top >= contentTopY()) {
+      state.pinMode = "top";
+      // Just inside the block, so a boundary shared with the previous
+      // sibling never resolves to that sibling.
+      state.anchorOffset = node.source_span[0] + 0.5;
+      return rect.top;
+    }
+    state.pinMode = "point";
+    state.anchorOffset = offsetAtY(anchorId, rect, anchorY);
     return anchorY;
+  }
+
+  function pinY(nodeId, rect, offset) {
+    return state.pinMode === "top" ? rect.top : yOfOffset(nodeId, rect, offset);
+  }
+
+  // Pin outline: shown from gesture start until it ends (Z released, wheel
+  // burst over, or shortly after a single key/button step).
+  let pinTimer = null;
+  function showPin(nodeId) {
+    clearTimeout(pinTimer);
+    state.pinActive = true;
+    markPinned(nodeId);
+  }
+  function markPinned(nodeId) {
+    $content.querySelectorAll(".node.pinned").forEach((n) => n.classList.remove("pinned"));
+    const elNode = nodeId && $content.querySelector(`[data-node-id="${nodeId}"]`);
+    if (elNode) elNode.classList.add("pinned");
+  }
+  function endPin(delayMs) {
+    clearTimeout(pinTimer);
+    pinTimer = setTimeout(() => {
+      state.pinActive = false;
+      $content.querySelectorAll(".node.pinned").forEach((n) => n.classList.remove("pinned"));
+    }, delayMs || 0);
   }
 
   function offsetAtY(nodeId, rect, y) {
@@ -1155,6 +1236,7 @@
     const anchorY = beginPointerGesture(lastMouse.x, lastMouse.y);
     const total = Math.max(1, state.sequence.length);
     setZ(state.z + deltaSteps / total, inputType, anchorY);
+    endPin(900);
   }
 
   // The pill's Less/More buttons step at the viewport-centre anchor,
@@ -1166,6 +1248,7 @@
     const anchorY = beginPointerGesture(cx, cy);
     const total = Math.max(1, state.sequence.length);
     setZ(state.z + deltaSteps / total, "key", anchorY);
+    endPin(900);
   }
   el("zoom-less").addEventListener("click", () => stepAtViewportCentre(-1));
   el("zoom-more").addEventListener("click", () => stepAtViewportCentre(1));
@@ -1195,6 +1278,8 @@
   // ---- Keyboard: =/- as a global expand/collapse-one-step alternative ----
   document.addEventListener("keydown", (e) => {
     if (!$app.classList.contains("active")) return;
+    // Ctrl/Cmd with +/-/0 is the browser's own page zoom; leave it alone.
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     const tag = (e.target.tagName || "").toLowerCase();
     if (tag === "input" || tag === "textarea") return;
     if (e.key === "=" || e.key === "+") {
@@ -1228,13 +1313,14 @@
     zStartX = null;
     zAppliedSteps = 0;
     zGestureY = null;
+    endPin(350);
     document.body.classList.remove("zoom-drag-active");
     window.removeEventListener("mousemove", zMoveHandler);
   }
   document.addEventListener("keydown", (e) => {
     if (!$app.classList.contains("active")) return;
     if (e.key !== "z" && e.key !== "Z") return;
-    if (e.repeat || zHeld) return;
+    if (e.repeat || zHeld || e.ctrlKey || e.metaKey || e.altKey) return;
     const tag = (e.target.tagName || "").toLowerCase();
     if (tag === "input" || tag === "textarea") return;
     zHeld = true;
@@ -1266,6 +1352,7 @@
       clearTimeout(wheelBurstTimer);
       wheelBurstTimer = setTimeout(() => {
         wheelBurstActive = false;
+        endPin(350);
       }, 250);
 
       const magnitude = Math.abs(e.deltaY);
@@ -1330,42 +1417,11 @@
   });
 
   // ---------------------------------------------------------------------
-  // Source hover popover + click-to-jump
+  // Click-to-jump to source (the ¶ label on summaries)
   // ---------------------------------------------------------------------
   function firstNSentences(text, n) {
     const parts = (text || "").match(/[^.!?]+[.!?]?/g) || [text];
     return parts.slice(0, n).join(" ").trim();
-  }
-
-  let popoverTimer = null;
-  $content.addEventListener("mouseover", (e) => {
-    const hint = e.target.closest(".source-hint");
-    if (!hint) return;
-    const nodeEl = hint.closest("[data-node-id]");
-    const node = state.tree.nodes[nodeEl.dataset.nodeId];
-    if (!node || !node.cites || node.cites.length === 0) return;
-    clearTimeout(popoverTimer);
-    popoverTimer = setTimeout(() => showPopover(hint, node), 250);
-    logEvent("hover_source", { tree_id: state.tree.id, node_id: node.id });
-  });
-  $content.addEventListener("mouseout", (e) => {
-    if (e.target.closest(".source-hint")) {
-      clearTimeout(popoverTimer);
-      $popover.classList.remove("visible");
-    }
-  });
-
-  function showPopover(anchorEl, node) {
-    const leafId = node.cites[0];
-    const leaf = state.tree.nodes[leafId];
-    if (!leaf) return;
-    const excerpt = firstNSentences(leaf.text, 2);
-    $popover.innerHTML = `${escapeHtml(excerpt)}<span class="popover-hint">click to jump to source</span>`;
-    const rect = anchorEl.getBoundingClientRect();
-    $popover.style.left = `${Math.max(8, rect.left)}px`;
-    $popover.style.top = `${rect.bottom + window.scrollY + 6}px`;
-    $popover.classList.add("visible");
-    $popover.dataset.leafId = leafId;
   }
 
   function jumpToLeaf(leafId) {
@@ -1388,7 +1444,6 @@
     });
     const total = Math.max(1, state.sequence.length);
     setZ(neededK / total, "key");
-    $popover.classList.remove("visible");
   }
 
   // ---------------------------------------------------------------------

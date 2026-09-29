@@ -36,3 +36,60 @@ def test_js_and_python_expansion_orders_match():
     ).stdout)
     for anchor in tree.nodes:
         assert js[anchor] == expansion_sequence(tree, anchor), f"order differs for anchor {anchor}"
+
+
+KEEP_SCRIPT = """
+const fs = require('fs');
+global.window = {};
+eval(fs.readFileSync(process.argv[1], 'utf8'));
+const tree = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const cases = JSON.parse(process.argv[3]);
+const out = cases.map(([anchor, keep]) => window.Frontier.buildExpansionSequence(tree, anchor, new Set(keep)));
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def _expanded_set(tree: Tree, frontier: list[str]) -> set[str]:
+    out: set[str] = set()
+    for nid in frontier:
+        cur = tree.nodes[nid].parent
+        while cur is not None:
+            out.add(cur)
+            cur = tree.nodes[cur].parent
+    return out
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_reanchoring_keeps_the_current_page_and_matches_js():
+    """Re-anchoring mid-zoom must not reshuffle the page: with the current
+    expanded set kept first, frontier(k) is unchanged and k+1 / k-1 differ
+    from it by exactly one expansion. And JS must agree with Python."""
+    from riemann.abstraction.frontier import frontier_at
+
+    tree = Tree.model_validate(json.loads(FIXTURE.read_text()))
+    ids = sorted(tree.nodes)
+    cases = []
+    for old_anchor in ids[::3]:
+        old_seq = expansion_sequence(tree, old_anchor)
+        for k in range(0, len(old_seq) + 1, 3):
+            current = frontier_at(tree, old_seq, k)
+            keep = _expanded_set(tree, current)
+            for new_anchor in ids[1::4]:
+                seq = expansion_sequence(tree, new_anchor, keep_expanded=keep)
+                assert frontier_at(tree, seq, len(keep)) == current
+                for k2 in (len(keep) - 1, len(keep) + 1):
+                    if 0 <= k2 <= len(seq):
+                        changed = set(frontier_at(tree, seq, k2)) ^ set(current)
+                        # exactly one node swapped for its children (or back)
+                        assert any(
+                            changed == {n} | set(tree.nodes[n].children) for n in changed
+                        ), (old_anchor, k, new_anchor, k2)
+                cases.append((new_anchor, sorted(keep), seq))
+
+    js = json.loads(subprocess.run(
+        ["node", "-e", KEEP_SCRIPT, str(ROOT / "web" / "frontier.js"), str(FIXTURE),
+         json.dumps([[a, k] for a, k, _ in cases])],
+        capture_output=True, text=True, check=True,
+    ).stdout)
+    for (anchor, keep, py_seq), js_seq in zip(cases, js):
+        assert js_seq == py_seq, f"order differs for anchor {anchor}"

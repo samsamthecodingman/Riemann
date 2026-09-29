@@ -670,6 +670,43 @@ button {
   white-space: nowrap;
 }
 
+/* Summaries: the ¶ label is the link to the original text. */
+button.source-link {
+  border: none;
+  background: none;
+  padding: 2px 6px;
+  margin: -2px -6px;
+  border-radius: var(--pill);
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+button.source-link:hover,
+button.source-link:focus-visible {
+  background: var(--chip);
+  color: var(--text);
+  text-decoration: none;
+}
+.source-link-more {
+  display: none;
+}
+button.source-link:hover .source-link-more,
+button.source-link:focus-visible .source-link-more {
+  display: inline;
+}
+
+/* Zoom pin: the passage held in place during a zoom gesture. Outline, so
+   it never touches layout or the wash's box-shadow. */
+.node {
+  outline: 2px solid transparent;
+  outline-offset: 10px;
+  transition: outline-color 300ms ease;
+}
+.node.pinned {
+  outline-color: color-mix(in srgb, var(--sec-n, var(--hl)), var(--text) 40%);
+  border-radius: 10px;
+}
+
 .node-body {
   font-family: var(--ui);
   font-size: 17px;
@@ -929,33 +966,6 @@ button {
    where the sticky #rail shows the current section instead. */
 .section-rail-inline {
   display: none;
-}
-
-/* ---------- Source popover ---------- */
-
-#source-popover {
-  position: absolute;
-  z-index: 40;
-  max-width: 42ch;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-sm);
-  padding: 0.65rem 0.8rem;
-  font-size: 0.85rem;
-  color: var(--muted);
-  display: none;
-}
-
-#source-popover.visible {
-  display: block;
-}
-
-#source-popover .popover-hint {
-  display: block;
-  margin-top: 0.35rem;
-  font-size: 0.75rem;
-  color: var(--label);
 }
 
 /* ---------- Highlight toolbar ---------- */

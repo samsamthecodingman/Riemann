@@ -24,9 +24,14 @@
  *
  * @param {object} tree - Tree JSON per the shared schema (nodes: {id: Node}).
  * @param {string} anchorNodeId - id of the node currently at viewport centre.
+ * @param {Set<string>} [keepExpanded] - nodes expanded right now. They go
+ *   first (parents-first, nearest-first among themselves), so re-anchoring
+ *   keeps the page exactly as it is: frontierAtK(seq, keepExpanded.size) is
+ *   the current frontier and the next step changes one node. Mirrors
+ *   keep_expanded in riemann/abstraction/frontier.py.
  * @returns {string[]} ordered list of internal node ids to expand, in order.
  */
-function buildExpansionSequence(tree, anchorNodeId) {
+function buildExpansionSequence(tree, anchorNodeId, keepExpanded) {
   const nodes = tree.nodes;
   const anchor = nodes[anchorNodeId] || nodes[tree.root];
   const anchorMid = (anchor.source_span[0] + anchor.source_span[1]) / 2;
@@ -51,6 +56,14 @@ function buildExpansionSequence(tree, anchorNodeId) {
     for (let i = 1; i < candidates.length; i++) {
       const a = nodes[candidates[i]];
       const b = nodes[candidates[bestIdx]];
+      if (keepExpanded) {
+        const ka = keepExpanded.has(candidates[i]) ? 0 : 1;
+        const kb = keepExpanded.has(candidates[bestIdx]) ? 0 : 1;
+        if (ka !== kb) {
+          if (ka < kb) bestIdx = i;
+          continue;
+        }
+      }
       const da = distanceOf(a);
       const db = distanceOf(b);
       if (da !== db) {
