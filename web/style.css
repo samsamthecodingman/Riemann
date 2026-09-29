@@ -736,17 +736,67 @@ button {
   max-width: 60ch;
 }
 
+/* Zoom transitions (see render() in app.js). None of these may change
+   layout: opacity, filter and box-shadow only. */
 .node.fade-enter {
-  animation: fadeIn var(--transition-fast) ease both;
+  animation: nodeEnter 320ms ease-out both;
 }
 
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+/* A zoom step: fade/unblur in over the first ~third, while a wash in the
+   section hue (box-shadow spread pads it past the text) settles to nothing. */
+.node.fade-enter.wash {
+  animation: nodeEnterWash 1100ms ease-out both;
+  border-radius: 10px;
+}
+
+@keyframes nodeEnter {
+  from { opacity: 0; filter: blur(3px); }
+  to { opacity: 1; filter: blur(0); }
+}
+
+@keyframes nodeEnterWash {
+  0% {
+    opacity: 0;
+    filter: blur(3px);
+    background-color: color-mix(in srgb, var(--sec-n, var(--hl)) 75%, transparent);
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--sec-n, var(--hl)) 75%, transparent);
+  }
+  28% {
+    opacity: 1;
+    filter: blur(0);
+    background-color: color-mix(in srgb, var(--sec-n, var(--hl)) 75%, transparent);
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--sec-n, var(--hl)) 75%, transparent);
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0);
+    background-color: transparent;
+    box-shadow: 0 0 0 10px transparent;
+  }
+}
+
+.zoom-ghost-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  overflow: hidden;
+}
+
+.zoom-ghost {
+  position: fixed;
+  margin: 0;
+  animation: ghostOut 200ms ease-in both;
+}
+
+@keyframes ghostOut {
+  from { opacity: 1; filter: blur(0); }
+  to { opacity: 0; filter: blur(2px); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .node.fade-enter,
+  .zoom-ghost,
   #content.column-crossfade,
   .rail-card,
   .node {

@@ -575,11 +575,53 @@
   // mid-transition.
   let lastRenderRects = new Map();
 
+  // Zoom transitions. Nothing here may change layout (the pointer anchor
+  // is measured from lastRenderRects and pinned by scrolling), so every
+  // effect is opacity, filter, box-shadow or a transform that settles to 0:
+  // - passages leaving the frontier linger as fixed-position ghosts and fade out
+  // - passages entering fade/unblur in with a brief pastel wash in their
+  //   section hue, so it's obvious what just changed
+  // - passages that stayed but moved glide to their new place (FLIP),
+  //   measured after the anchor scroll so they don't start from a stale spot
+  const GHOST_MS = 200;
+  let $ghostLayer = null;
+
+  function clearGhosts() {
+    if ($ghostLayer) $ghostLayer.remove();
+    $ghostLayer = null;
+  }
+
+  function captureGhosts(keepIds) {
+    const ghosts = [];
+    const vh = window.innerHeight;
+    for (const elNode of $content.querySelectorAll("[data-node-id]")) {
+      if (keepIds.has(elNode.dataset.nodeId)) continue;
+      const r = elNode.getBoundingClientRect();
+      if (r.bottom < 0 || r.top > vh || r.height === 0) continue;
+      const clone = elNode.cloneNode(true);
+      clone.removeAttribute("data-node-id");
+      clone.querySelectorAll("[data-node-id]").forEach((n) => n.removeAttribute("data-node-id"));
+      clone.classList.remove("fade-enter", "wash");
+      clone.classList.add("zoom-ghost");
+      const secN = getComputedStyle(elNode).getPropertyValue("--sec-n");
+      Object.assign(clone.style, {
+        left: `${r.left}px`,
+        top: `${r.top}px`,
+        width: `${r.width}px`,
+        transform: "",
+        transition: "",
+      });
+      if (secN) clone.style.setProperty("--sec-n", secN);
+      ghosts.push(clone);
+    }
+    return ghosts;
+  }
+
   function render(opts) {
     opts = opts || {};
-    const tree = state.tree;
     const prevRects = new Map();
-    if (!REDUCED_MOTION && !opts.columnCrossfade) {
+    const animate = !REDUCED_MOTION && !opts.columnCrossfade;
+    if (animate) {
       for (const elNode of $content.querySelectorAll("[data-node-id]")) {
         prevRects.set(elNode.dataset.nodeId, elNode.getBoundingClientRect());
       }
@@ -587,6 +629,8 @@
 
     const oldIds = Array.from($content.querySelectorAll("[data-node-id]")).map((n) => n.dataset.nodeId);
     const oldSet = new Set(oldIds);
+    clearGhosts();
+    const ghosts = animate && oldSet.size ? captureGhosts(new Set(state.frontier)) : [];
 
     if (opts.columnCrossfade && !REDUCED_MOTION) {
       $content.classList.add("column-crossfade");
@@ -604,6 +648,7 @@
 
     doRender();
     if (opts.onRendered) opts.onRendered();
+    if (animate) animateTransition();
 
     function doRender() {
       $content.innerHTML = contentHTML();
@@ -616,26 +661,41 @@
       for (const elNode of $content.querySelectorAll("[data-node-id]")) {
         lastRenderRects.set(elNode.dataset.nodeId, elNode.getBoundingClientRect());
       }
+    }
 
-      if (REDUCED_MOTION) return;
+    function animateTransition() {
+      if (ghosts.length) {
+        $ghostLayer = document.createElement("div");
+        $ghostLayer.className = "zoom-ghost-layer";
+        $ghostLayer.setAttribute("aria-hidden", "true");
+        ghosts.forEach((g) => $ghostLayer.appendChild(g));
+        document.body.appendChild($ghostLayer);
+        const layer = $ghostLayer;
+        setTimeout(() => { if ($ghostLayer === layer) clearGhosts(); }, GHOST_MS + 40);
+      }
 
+      // Wash only on a real zoom step (something stayed on screen); on a
+      // fresh open everything is new and a page-wide wash would just flash.
+      const isStep = oldSet.size > 0 && state.frontier.some((id) => oldSet.has(id));
       for (const elNode of $content.querySelectorAll("[data-node-id]")) {
         const id = elNode.dataset.nodeId;
         if (prevRects.has(id)) {
-          const oldRect = prevRects.get(id);
-          const newRect = lastRenderRects.get(id);
-          const dy = oldRect.top - newRect.top;
+          const dy = prevRects.get(id).top - elNode.getBoundingClientRect().top;
           if (Math.abs(dy) > 0.5) {
-            elNode.style.transform = `translateY(${dy}px)`;
             elNode.style.transition = "none";
+            elNode.style.transform = `translateY(${dy}px)`;
             requestAnimationFrame(() => {
-              elNode.style.transition = `transform 180ms ease`;
+              elNode.style.transition = "transform 260ms cubic-bezier(0.2, 0.7, 0.2, 1)";
               elNode.style.transform = "";
             });
           }
         } else if (!oldSet.has(id)) {
           elNode.classList.add("fade-enter");
-          elNode.addEventListener("animationend", () => elNode.classList.remove("fade-enter"), { once: true });
+          if (isStep) elNode.classList.add("wash");
+          elNode.addEventListener("animationend", (e) => {
+            if (e.target !== elNode) return;
+            elNode.classList.remove("fade-enter", "wash");
+          });
         }
       }
     }
