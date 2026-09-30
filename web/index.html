@@ -131,6 +131,10 @@
       <span id="doc-hook"></span>
     </div>
     <div class="header-spacer"></div>
+    <button id="map-btn" type="button" aria-pressed="false" title="Show the document map (g)">
+      <span class="map-glyph" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+      Map
+    </button>
     <button id="palette-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-pressed="false">
       <span class="mini-dots" aria-hidden="true"><span id="mini-dot-0"></span><span id="mini-dot-1"></span><span id="mini-dot-2"></span></span>
       Palette
@@ -156,6 +160,22 @@
     <div class="nav-spacer"></div>
     <p class="nav-hint">Hold <strong>Z</strong> and move the mouse over any passage to open it up or fold it away.</p>
   </nav>
+
+  <section id="map-panel" aria-label="Document map" hidden>
+    <div class="map-bar">
+      <span class="map-kicker">MAP</span>
+      <span id="map-sub" class="map-sub"></span>
+      <div class="map-bar-spacer"></div>
+      <button id="map-fit" type="button" class="map-ctl map-ctl-fit">Fit</button>
+      <button id="map-out" type="button" class="map-ctl map-ctl-round" aria-label="Zoom map out">&minus;</button>
+      <button id="map-in" type="button" class="map-ctl map-ctl-round" aria-label="Zoom map in">+</button>
+      <button id="map-close" type="button" class="map-ctl map-ctl-close" aria-label="Close map">&#10005;</button>
+    </div>
+    <div id="map-frame">
+      <div id="map-world"><div id="map-here" hidden aria-hidden="true">You are here</div></div>
+    </div>
+    <p class="map-hint">Scroll to zoom &middot; drag to move &middot; click a region to read it</p>
+  </section>
 
   <div id="top-spacer" aria-hidden="true"></div>
   <div id="content" role="feed" aria-label="Document content"></div>
@@ -205,6 +225,8 @@
 <div id="live-region" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
 
 <script src="frontier.js"></script>
+<script src="maplayout.js"></script>
+<script src="map.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

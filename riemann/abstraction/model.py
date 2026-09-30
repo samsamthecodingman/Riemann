@@ -47,6 +47,8 @@ class Node(BaseModel):
     importance: float = 0.5
     atomic: bool = False
     title: str | None = None
+    short_title: str | None = None
+    """<=3 words / 24 chars label for the spatial map's small tiles (optional)."""
     hook: str | None = None
     key_points: list[str] = Field(default_factory=list)
     key_fact: KeyFact | None = None

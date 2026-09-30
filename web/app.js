@@ -227,6 +227,7 @@
     const root = document.documentElement.style;
     state.palette.sections.forEach((c, i) => root.setProperty(`--sec-${i + 1}`, c));
     root.setProperty("--hl", state.palette.hl);
+    if (window.RiemannMap) window.RiemannMap.update();
   }
 
   function hlStorageKey(treeId) {
@@ -723,6 +724,7 @@
       setTimeout(() => {
         doRender();
         if (opts.onRendered) opts.onRendered();
+        if (window.RiemannMap) window.RiemannMap.update();
         requestAnimationFrame(() => {
           $content.style.opacity = "1";
           setTimeout(() => $content.classList.remove("column-crossfade"), 200);
@@ -734,6 +736,7 @@
     doRender();
     if (opts.onRendered) opts.onRendered();
     if (animate) animateTransition();
+    if (window.RiemannMap) window.RiemannMap.update();
 
     function doRender() {
       $content.innerHTML = contentHTML();
@@ -1211,6 +1214,54 @@
     return (navIsRow ? nb.bottom : hb) + 8;
   }
 
+  // Spatial view hooks (web/map.js). Frontier passages whose blocks are on
+  // screen, in reading order, below the header/nav.
+  function visibleFrontierIds() {
+    const top = contentTopY();
+    const bottom = window.innerHeight;
+    const ids = [];
+    for (const n of $content.querySelectorAll("[data-node-id]")) {
+      const r = n.getBoundingClientRect();
+      if (r.height > 0 && r.bottom > top && r.top < bottom) ids.push(n.dataset.nodeId);
+    }
+    return ids;
+  }
+
+  // Run fn (which reflows the page, e.g. opening the map) and scroll so the
+  // anchor passage keeps its screen y. Same deficit handling as setZ.
+  function keepReadingPosition(fn) {
+    const top = contentTopY();
+    const bottom = window.innerHeight;
+    let elAnchor = state.anchorNodeId && $content.querySelector(`[data-node-id="${state.anchorNodeId}"]`);
+    if (elAnchor) {
+      const r = elAnchor.getBoundingClientRect();
+      if (!(r.bottom > top && r.top < bottom)) elAnchor = null;
+    }
+    if (!elAnchor) {
+      for (const n of $content.querySelectorAll("[data-node-id]")) {
+        const r = n.getBoundingClientRect();
+        if (r.bottom > top && r.top < bottom) {
+          elAnchor = n;
+          break;
+        }
+      }
+    }
+    const before = elAnchor ? elAnchor.getBoundingClientRect().top : null;
+    state.lastDialChangeAt = Date.now(); // the scroll below is not a re-anchor
+    fn();
+    if (!elAnchor || !elAnchor.isConnected || before == null) return;
+    const delta = elAnchor.getBoundingClientRect().top - before;
+    if (Math.abs(delta) < 0.25) return;
+    const deficit = -(window.scrollY + delta);
+    if (deficit > 0) {
+      topSpacerPx += deficit;
+      $topSpacer.style.height = `${topSpacerPx}px`;
+      window.scrollTo(0, 0);
+    } else {
+      window.scrollBy(0, delta);
+    }
+  }
+
   function beginPointerGesture(px, py) {
     let x = px;
     let y = py;
@@ -1625,6 +1676,7 @@
 
     if (saved) showResumeCard(anchorId);
     maybeShowHint();
+    if (window.RiemannMap) window.RiemannMap.update();
 
   }
 
@@ -1690,6 +1742,7 @@
       renderPaletteOpenState();
     }
     resetTopSpacer();
+    if (window.RiemannMap) window.RiemannMap.update();
     $loading.hidden = true;
     $app.classList.remove("active");
     $startScreen.style.display = "";
@@ -2081,6 +2134,22 @@
   // Boot
   // ---------------------------------------------------------------------
   async function boot() {
+    if (window.RiemannMap) {
+      window.RiemannMap.init({
+        getTree: () => state.tree,
+        getFrontier: () => state.frontier,
+        getProse: () => state.prose,
+        sectionsOf,
+        sectionAncestor,
+        nodeTitle,
+        nodeProvenance,
+        jumpToNode,
+        logEvent,
+        contentTopY,
+        visibleFrontierIds,
+        keepReadingPosition,
+      });
+    }
     state.palette = loadPalette();
     applyPaletteToCSS();
     if (IS_FIXTURE) {

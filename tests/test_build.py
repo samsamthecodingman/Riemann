@@ -6,7 +6,9 @@ from riemann.abstraction.build import (
     KEY_POINT_MAX_WORDS,
     KEY_POINTS_MAX_ITEMS,
     TITLE_MAX_WORDS,
+    _clean_child_short_titles,
     _clean_child_titles,
+    _clean_short_title,
     _clean_hook,
     _clean_key_points,
     _clean_title,
@@ -264,6 +266,24 @@ def test_child_titles_keys_must_be_real_child_ids():
     raw = {"child_a": "A Real Child", "not_a_child": "Should Be Dropped"}
     cleaned = _clean_child_titles(raw, ["child_a", "child_b"])
     assert cleaned == {"child_a": "A Real Child"}
+
+
+def test_short_title_limits_drop_not_truncate():
+    assert _clean_short_title("Time windows") == "Time windows"
+    assert _clean_short_title("one two three four") is None
+    assert _clean_short_title("Extraordinarily-long-single-word") is None
+    assert _clean_short_title("  ") is None
+    assert _clean_short_title(None) is None
+    cleaned = _clean_child_short_titles({"a": "Fine", "zz": "Ghost", "b": "far too many words here"}, ["a", "b"])
+    assert cleaned == {"a": "Fine"}
+
+
+async def test_short_titles_populated_and_valid():
+    tree = await _build(_doc(1500), tree_id="shorttitles")
+    with_short = [n for n in tree.nodes.values() if n.short_title]
+    assert with_short
+    for n in with_short:
+        assert len(n.short_title.split()) <= 3 and len(n.short_title) <= 24
 
 
 # --- old-schema JSON still loads ------------------------------------------

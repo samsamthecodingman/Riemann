@@ -296,6 +296,8 @@ class FakeSummariser:
         title = " ".join(words[:5]) if words else "Untitled"
         hook = " ".join(words[:15]) if words else ""
         child_titles = {cid: " ".join((f"About {cid}").split()[:8]) for cid in child_ids}
+        short_title = " ".join(words[:2])[:24].strip() or None
+        child_short_titles = {cid: f"Part {cid[-4:]}" for cid in child_ids}
         key_points = [chunk for chunk in (" ".join(words[i : i + 4]) for i in range(0, min(len(words), 8), 4)) if chunk]
 
         result = {
@@ -305,6 +307,8 @@ class FakeSummariser:
             "title": title,
             "hook": hook,
             "child_titles": child_titles,
+            "short_title": short_title,
+            "child_short_titles": child_short_titles,
             "key_points": key_points,
             "key_fact": None,
             "steps": [],

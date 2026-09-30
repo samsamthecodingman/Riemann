@@ -32,6 +32,8 @@ MAX_BUILD_ROUNDS = 40
 # or drop; don't retry."
 TITLE_MAX_WORDS = 8
 HOOK_MAX_WORDS = 20
+SHORT_TITLE_MAX_WORDS = 3
+SHORT_TITLE_MAX_CHARS = 24
 KEY_POINTS_MAX_ITEMS = 4
 KEY_POINT_MAX_WORDS = 18
 
@@ -57,8 +59,10 @@ sentence case (capitalise only the first word, proper nouns and acronyms), e.g. 
 Respond with ONLY JSON, no prose outside it and no markdown code fences:
 {"text": "...", "cites": ["leaf_id", ...], "importance": {"child_id": 0.0},
  "title": "2-8 word faithful headline for this node",
+ "short_title": "<=3 words, <=24 characters: a label for this node on a small map tile",
  "hook": "<=20 words, one line: why this part matters",
  "child_titles": {"child_id": "2-8 word faithful headline for that child"},
+ "child_short_titles": {"child_id": "<=3 words, <=24 characters"},
  "key_points": ["2-4 short bullets, each <=18 words, only for a node whose children are sections or paragraphs"],
  "key_fact": {"big": "the number/finding", "detail": "one short clause of context", "cites": ["leaf_id", ...]},
  "steps": ["3-6 short labels, only when the content describes a sequence or process"]}
@@ -66,6 +70,7 @@ Respond with ONLY JSON, no prose outside it and no markdown code fences:
 "cites": leaf ids only, drawn from the "Leaf ids you may cite" list below -- the ones this summary's claims actually come from.
 "importance": one entry per id listed in "Child ids" below, 0..1, relative to its siblings, reflecting how much that child matters to the overall point.
 "child_titles": one entry per id listed in "Child ids" below.
+"short_title" / "child_short_titles": very short labels (at most 3 words and 24 characters) for the same nodes.
 "key_points": [] when the children aren't sections/paragraphs (e.g. a single atomic block).
 "key_fact": only when the source contains a genuinely striking, specific fact -- otherwise null. Every number in
 "big"/"detail" must actually appear in the cited leaves' text. "cites" here are the leaf ids that support the fact.
@@ -196,6 +201,29 @@ def _clean_title(raw: object) -> str | None:
     if not isinstance(raw, str) or not raw.strip():
         return None
     return _truncate_words(raw.strip(), TITLE_MAX_WORDS)
+
+
+def _clean_short_title(raw: object) -> str | None:
+    """At most 3 words and 24 characters, else dropped (not truncated: a cut
+    label reads worse than the ellipsis fallback)."""
+    if not isinstance(raw, str):
+        return None
+    s = raw.strip()
+    if not s or len(s.split()) > SHORT_TITLE_MAX_WORDS or len(s) > SHORT_TITLE_MAX_CHARS:
+        return None
+    return s
+
+
+def _clean_child_short_titles(raw: object, valid_child_ids: list[str]) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        return {}
+    valid = set(valid_child_ids)
+    out: dict[str, str] = {}
+    for child_id, t in raw.items():
+        cleaned = _clean_short_title(t) if child_id in valid else None
+        if cleaned:
+            out[child_id] = cleaned
+    return out
 
 
 def _clean_hook(raw: object) -> str | None:
@@ -481,11 +509,13 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
             importance_map = result.get("importance") if isinstance(result.get("importance"), dict) else {}
 
             title = _clean_title(result.get("title"))
+            short_title = _clean_short_title(result.get("short_title"))
             hook = _clean_hook(result.get("hook"))
             key_points = _clean_key_points(result.get("key_points"))
             steps = _clean_steps(result.get("steps"))
             key_fact = _validate_key_fact(result.get("key_fact"), nodes, leaf_ctx_ids)
             child_titles = _clean_child_titles(result.get("child_titles"), group_ids)
+            child_short = _clean_child_short_titles(result.get("child_short_titles"), group_ids)
 
             span = _span_union(nodes, group_ids)
             nid = _new_id(counter, span)
@@ -502,6 +532,7 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
                 importance=1.0,
                 atomic=False,
                 title=title,
+                short_title=short_title,
                 hook=hook,
                 key_points=key_points,
                 key_fact=key_fact,
@@ -517,6 +548,8 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
                         pass
                 if cid in child_titles:
                     nodes[cid].title = child_titles[cid]
+                if cid in child_short:
+                    nodes[cid].short_title = child_short[cid]
             return nid, parent
 
     current_level = list(leaf_ids)
