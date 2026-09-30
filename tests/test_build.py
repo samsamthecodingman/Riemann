@@ -435,3 +435,12 @@ def test_essential_value_is_capped_by_validator_not_clamped():
     out = _clean_essentials([{"label": "Due", "value": long_value, "cites": []}], {}, set())
     assert len(out) == 1
     assert len(out[0].value.split()) == ESSENTIAL_VALUE_MAX_WORDS == 30
+
+
+def test_over_long_titles_do_not_end_on_a_dangling_word_or_number():
+    from riemann.abstraction.build import _truncate_title
+
+    assert _truncate_title("Submit as one PDF by 5 pm, 14 November 2025") == "Submit as one PDF by 5 pm"
+    assert _truncate_title("Marks are split across the five criteria and the of") == "Marks are split across the five criteria"
+    assert _truncate_title("Short title here") == "Short title here"
+    assert _truncate_title("one two three four five six seven eight nine") == "one two three four five six seven eight"

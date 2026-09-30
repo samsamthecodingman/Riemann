@@ -255,10 +255,29 @@ def _truncate_words(text: str, max_words: int) -> str:
     return " ".join(words[:max_words]).strip()
 
 
+_DANGLING = {
+    "a", "an", "the", "of", "to", "by", "in", "on", "at", "for", "and", "or", "with", "from",
+    "as", "than", "that", "into", "via", "per", "is", "are", "be", "before", "after",
+}
+
+
+def _truncate_title(text: str, max_words: int = 8) -> str:
+    """Cut a title to max_words without leaving a dangling tail: a cut such as
+    "Submit as one PDF by 5 pm, 14" drops the "14" (and stray connectives and
+    commas) rather than ending on half a date. Untouched when already short."""
+    words = text.split()
+    if len(words) <= max_words:
+        return text.strip()
+    kept = words[:max_words]
+    while len(kept) > 2 and (kept[-1].strip(",;:-–").lower() in _DANGLING or kept[-1].strip(",;:.").isdigit()):
+        kept.pop()
+    return " ".join(kept).rstrip(" ,;:-–")
+
+
 def _clean_title(raw: object) -> str | None:
     if not isinstance(raw, str) or not raw.strip():
         return None
-    return _truncate_words(raw.strip(), TITLE_MAX_WORDS)
+    return _truncate_title(raw.strip(), TITLE_MAX_WORDS)
 
 
 def _clean_short_title(raw: object) -> str | None:
@@ -395,7 +414,7 @@ def _clean_child_titles(raw: object, valid_child_ids: list[str]) -> dict[str, st
     for child_id, title in raw.items():
         if child_id not in valid or not isinstance(title, str) or not title.strip():
             continue
-        out[child_id] = _truncate_words(title.strip(), TITLE_MAX_WORDS)
+        out[child_id] = _truncate_title(title.strip(), TITLE_MAX_WORDS)
     return out
 
 
