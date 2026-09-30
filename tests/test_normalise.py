@@ -195,3 +195,31 @@ def test_short_documents_and_unique_lines_are_left_alone():
     assert ingest.strip_running_headers(pages) == pages  # under 3 pages
     pages = [f"Heading {w}\nbody about {w}\nclosing on {w}" for w in ("cats", "dogs", "birds", "fish")]
     assert ingest.strip_running_headers(pages) == pages  # nothing repeats
+
+
+def test_numbered_heading_line_is_not_a_list_that_swallows_the_next_paragraph():
+    wrapped = (
+        "Managers usually respond in one of three ways:\n"
+        "hard defences such as sea walls, soft defences such\n"
+        "as beach nourishment, or managed retreat. Each has\n"
+        "costs that fall on different groups, and each changes\n"
+        "the sediment budget of neighbouring beaches, which\n"
+        "is why decisions taken in one town often surprise\n"
+        "the next town along the coast.\n"
+    )
+    src = "Prepared for the Board, October 2025\n1. Section number one heading\n" + wrapped + "2. Method\n" + wrapped
+    out = normalise_text(src)
+    assert "1. Section number one heading\n\nManagers usually" in out
+    assert "\n\n2. Method\n\nManagers usually" in out
+    assert normalise_text(out) == out  # idempotent
+
+
+def test_real_numbered_list_is_still_a_list():
+    src = (
+        "You must do the following before the deadline:\n"
+        "1. Submit the report through the portal\n"
+        "2. Attend the demonstration session\n"
+        "3. Complete the peer review form\n"
+    )
+    out = normalise_text(src)
+    assert "1. Submit the report through the portal\n2. Attend the demonstration session" in out

@@ -229,13 +229,17 @@ def _rejoin_wrapped(lines: list[str]) -> str:
         cur = []
         kind = "p"
 
+    def is_item_line(t: str) -> bool:
+        return bool(_BULLET_LINE_RE.match(t) or _DASH_BULLET_RE.match(t) or re.match(r"^\s*([-*+]|\d{1,3}[.)]|[a-zA-Z][.)])\s+\S", t))
+
     prev = ""
-    for raw in lines:
+    for idx, raw in enumerate(lines):
         s = raw.strip()
         if not s:
             close()
             prev = ""
             continue
+        nxt = next((x.strip() for x in lines[idx + 1:] if x.strip()), "")
         md_bullet = re.match(r"^\s*[-*+]\s+(?=\S)", s)
         glyph = _BULLET_LINE_RE.match(s)
         dash = _DASH_BULLET_RE.match(s)
@@ -246,6 +250,19 @@ def _rejoin_wrapped(lines: list[str]) -> str:
                 close()
                 kind = "list"
             cur.append("- " + body)
+        elif (
+            numbered
+            and kind != "list"
+            and re.match(r"^\d{1,2}(\.\d{1,2})*[.)]?$", numbered.group(1))
+            and heading_like(s[numbered.end():])
+            and nxt
+            and not is_item_line(nxt)
+            and nxt[:1].isupper()
+        ):
+            # "2. Method" on a line of its own, followed by prose: a numbered
+            # heading, not a one-item list that swallows the next paragraph.
+            close()
+            blocks.append(("p", [s]))
         elif numbered:
             if kind != "list":
                 close()
