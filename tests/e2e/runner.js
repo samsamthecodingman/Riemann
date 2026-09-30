@@ -1,0 +1,330 @@
+// Browser checks for tests/e2e. Usage: node runner.js <playwright dir> <base url> <tree id> <check> [args]
+// Prints one JSON line: {ok: true|false, ...details}. Each check gets a fresh browser context.
+const [pwDir, BASE, TREE, CHECK, ...ARGS] = process.argv.slice(2);
+const { chromium } = require(pwDir);
+
+const words = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll("#content [data-node-id]")]
+      .map((n) => n.innerText.trim().split(/\s+/).filter(Boolean).length)
+      .reduce((a, b) => a + b, 0)
+  );
+
+async function openReader(page, id = TREE) {
+  await page.goto(`${BASE}/#/t/${id}`);
+  await page.waitForSelector("#content .node, .root-hero", { timeout: 15000 });
+  await page.waitForTimeout(500);
+}
+
+const overflow = (page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+
+function watch(page) {
+  const errors = [];
+  page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
+  page.on("console", (m) => {
+    if (m.type() === "error") errors.push("console: " + m.text());
+  });
+  return errors;
+}
+
+const checks = {
+  async zoom_grows_words(page) {
+    await openReader(page);
+    const seq = [await words(page)];
+    for (let i = 0; i < 12; i++) {
+      await page.keyboard.press("=");
+      await page.waitForTimeout(350);
+      seq.push(await words(page));
+    }
+    const grew = seq.every((w, i) => i === 0 || w >= seq[i - 1]);
+    return { ok: grew && seq[seq.length - 1] > seq[0] * 1.5, seq };
+  },
+
+  async pin_drift_under_2px(page) {
+    await openReader(page);
+    for (let i = 0; i < 3; i++) {
+      await page.keyboard.press("=");
+      await page.waitForTimeout(300);
+    }
+    await page.mouse.wheel(0, 900);
+    await page.waitForTimeout(400);
+    await page.mouse.move(600, 400);
+    await page.keyboard.down("z");
+    await page.waitForTimeout(300);
+    const pin = () =>
+      page.evaluate(() => {
+        const n = document.querySelector("#content .node.pinned");
+        return n ? n.getBoundingClientRect().top : null;
+      });
+    const tops = [await pin()];
+    for (let s = 1; s <= 5; s++) {
+      await page.mouse.move(600 + s * 26, 400);
+      await page.waitForTimeout(250);
+      tops.push(await pin());
+    }
+    for (let s = 4; s >= -2; s--) {
+      await page.mouse.move(600 + s * 26, 400);
+      await page.waitForTimeout(250);
+      tops.push(await pin());
+    }
+    await page.keyboard.up("z");
+    const seen = tops.filter((t) => t != null);
+    const drift = seen.length ? Math.max(...seen) - Math.min(...seen) : null;
+    return { ok: seen.length >= 5 && drift < 2, drift, samples: seen.length };
+  },
+
+  async map_toggle_and_jump(page) {
+    await openReader(page);
+    for (let i = 0; i < 4; i++) {
+      await page.keyboard.press("=");
+      await page.waitForTimeout(250);
+    }
+    await page.keyboard.press("g");
+    await page.waitForTimeout(700);
+    const open = await page.evaluate(() => ({ shown: !document.querySelector("#map-panel").hidden, tiles: document.querySelectorAll(".map-tile").length }));
+    const y0 = await page.evaluate(() => scrollY);
+    const tile = await page.evaluate(() => {
+      const ts = [...document.querySelectorAll(".map-tile")].filter((t) => t.dataset.nodeId);
+      const t = ts[Math.floor(ts.length * 0.8)];
+      const r = t.getBoundingClientRect();
+      return { id: t.dataset.nodeId, x: r.left + r.width / 2, y: r.top + Math.min(r.height / 2, 20) };
+    });
+    await page.mouse.click(tile.x, tile.y);
+    await page.waitForTimeout(1200);
+    const y1 = await page.evaluate(() => scrollY);
+    await page.keyboard.press("g");
+    await page.waitForTimeout(400);
+    const closed = await page.evaluate(() => document.querySelector("#map-panel").hidden);
+    return { ok: open.shown && open.tiles > 0 && y1 > y0 + 200 && closed, open, y0, y1, closed };
+  },
+
+  async columns_drag_persists(page) {
+    await openReader(page);
+    const width = () => page.evaluate(() => Math.round(document.querySelector("#section-nav").getBoundingClientRect().width));
+    const w0 = await width();
+    const h = await (await page.$("#col-handle-left")).boundingBox();
+    await page.mouse.move(h.x + h.width / 2, h.y + 200);
+    await page.mouse.down();
+    await page.mouse.move(h.x + h.width / 2 + 60, h.y + 200, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+    const w1 = await width();
+    await page.reload();
+    await page.waitForSelector("#content .node, .root-hero");
+    await page.waitForTimeout(600);
+    const w2 = await width();
+    return { ok: w1 > w0 + 40 && Math.abs(w2 - w1) <= 1, w0, w1, w2 };
+  },
+
+  async palette_and_highlight_persist(page) {
+    await openReader(page);
+    for (let i = 0; i < 6; i++) {
+      await page.keyboard.press("=");
+      await page.waitForTimeout(200);
+    }
+    await page.click("#palette-btn");
+    await page.click('[data-preset="Garden"]');
+    await page.keyboard.press("Escape");
+    await page.mouse.wheel(0, 600);
+    await page.waitForTimeout(400);
+    const t = await page.evaluate(() => {
+      const e = [...document.querySelectorAll("#content .node-body")].find((e) => {
+        const r = e.getBoundingClientRect();
+        return r.top > 120 && r.top < 600 && e.innerText.length > 100;
+      });
+      const r = e.getBoundingClientRect();
+      return { x: r.left + 20, y: r.top + 12 };
+    });
+    await page.mouse.move(t.x, t.y + 6);
+    await page.mouse.down();
+    await page.mouse.move(t.x + 200, t.y + 6, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+    await page.click("#highlight-toolbar .hl-swatch >> nth=0");
+    await page.waitForTimeout(300);
+    const marks0 = await page.evaluate(() => document.querySelectorAll("mark").length);
+    await page.reload();
+    await page.waitForSelector("#content .node, .root-hero");
+    await page.waitForTimeout(800);
+    const after = await page.evaluate(() => ({
+      marks: document.querySelectorAll("mark").length,
+      preset: JSON.parse(localStorage.getItem("riemann:palette")).preset,
+      sec1: getComputedStyle(document.documentElement).getPropertyValue("--sec-1").trim().toUpperCase(),
+    }));
+    return { ok: marks0 >= 1 && after.marks >= 1 && after.preset === "Garden" && after.sec1 === "#E1ECCB", marks0, after };
+  },
+
+  async poisoned_localstorage_is_harmless(page) {
+    await page.goto(BASE + "/");
+    await page.evaluate((id) => {
+      localStorage.setItem(
+        "riemann:palette",
+        JSON.stringify({ sections: ['red"><img src=x onerror="window.__pwn=1">', "#F6D5D1", "#D5E6CF", "#F7E8B5", "#D3E4F2"], hl: "#F9D3E3;x", preset: "<b onmouseover=window.__pwn=1>x</b>" })
+      );
+      localStorage.setItem("riemann:hl:" + id, JSON.stringify([{ id: 'x"><img src=x onerror=window.__pwn=1>', nodeId: "n1", start: "a", end: null, colour: 'red"><img src=x onerror=window.__pwn=1>' }]));
+      localStorage.setItem("riemann:pos:" + id, JSON.stringify({ anchor_node_id: "<img>", z: "NaN", anchor_offset: {} }));
+      localStorage.setItem("riemann:cols", '{"open":"x","closed":{"left":"<b>","rail":1e999}}');
+      localStorage.setItem("riemann:checkin", '{"ts":"x","capacity":{"a":1}}');
+    }, TREE);
+    await openReader(page);
+    await page.reload();
+    await page.waitForSelector("#content .node, .root-hero");
+    await page.waitForTimeout(600);
+    await page.click("#palette-btn");
+    await page.waitForTimeout(300);
+    const r = await page.evaluate(() => ({
+      pwn: window.__pwn || 0,
+      imgs: document.querySelectorAll("img").length,
+      nodes: document.querySelectorAll("#content [data-node-id]").length,
+      hero: !!document.querySelector(".root-hero"),
+    }));
+    return { ok: r.pwn === 0 && r.imgs === 0 && (r.nodes > 0 || r.hero), ...r };
+  },
+
+  async xss_payload_in_tree_text_is_escaped(page) {
+    const P = '<img src=x onerror="window.__pwn=(window.__pwn||0)+1">';
+    const text = `# ${P}\n\n` + Array.from({ length: 6 }, (_, i) => `## ${P} ${i}\n\n${P} ` + "Some ordinary words to fill the paragraph out. ".repeat(20)).join("\n\n");
+    const r = await fetch(BASE + "/api/abstract", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+    const { tree_id } = await r.json();
+    await openReader(page, tree_id);
+    for (let i = 0; i < 6; i++) {
+      await page.keyboard.press("=");
+      await page.waitForTimeout(200);
+    }
+    await page.keyboard.press("g");
+    await page.waitForTimeout(500);
+    await page.goto(BASE + "/");
+    await page.waitForTimeout(500);
+    const res = await page.evaluate(() => ({ pwn: window.__pwn || 0, imgs: document.querySelectorAll("img").length }));
+    return { ok: res.pwn === 0 && res.imgs === 0, ...res };
+  },
+
+  async overview_card_renders(page) {
+    await openReader(page);
+    const r = await page.evaluate(() => {
+      const c = document.querySelector(".overview-card");
+      const items = [...document.querySelectorAll(".ov-item")];
+      return {
+        card: !!c,
+        title: c && c.querySelector(".ov-title").innerText,
+        kind: c && c.querySelector(".ov-kind").innerText,
+        essentials: items.length,
+        labelled: items.every((i) => i.querySelector("dt span") && i.querySelector("dd").innerText.trim()),
+        clamped: items.some((i) => getComputedStyle(i.querySelector("dd > span")).webkitLineClamp !== "none"),
+      };
+    });
+    return { ok: r.card && r.essentials >= 3 && r.labelled && !r.clamped, ...r };
+  },
+
+  async phone_layout_no_overflow(page) {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openReader(page);
+    const seen = [await overflow(page)];
+    for (let i = 0; i < 8; i++) {
+      await page.keyboard.press("=");
+      await page.waitForTimeout(200);
+      seen.push(await overflow(page));
+    }
+    const header = await page.evaluate(() => {
+      const h = document.querySelector("#app-header").getBoundingClientRect();
+      return { top: h.top, h: h.height };
+    });
+    return { ok: seen.every((o) => o <= 0) && header.h > 40, seen, header };
+  },
+
+  async monkey_seed(page, errors) {
+    const seed = +(ARGS[0] || 7);
+    const N = +(ARGS[1] || 60);
+    let a = seed;
+    const R = () => {
+      a |= 0;
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const pick = (x) => x[Math.floor(R() * x.length)];
+    const ri = (lo, hi) => lo + Math.floor(R() * (hi - lo + 1));
+    await openReader(page);
+    const acts = {
+      zoomIn: () => page.keyboard.press("="),
+      zoomOut: () => page.keyboard.press("-"),
+      burst: async () => {
+        const k = pick(["=", "-"]);
+        for (let i = 0; i < ri(2, 5); i++) await page.keyboard.press(k);
+      },
+      scroll: async () => {
+        await page.mouse.move(ri(300, 900), ri(150, 650));
+        await page.mouse.wheel(0, ri(-1200, 1200));
+      },
+      zHold: async () => {
+        await page.mouse.move(ri(300, 900), ri(150, 650));
+        await page.keyboard.down("z");
+        for (let i = 0; i < ri(1, 4); i++) await page.mouse.move(ri(200, 1000), ri(150, 650), { steps: 3 });
+        await page.keyboard.up("z");
+      },
+      map: () => page.keyboard.press("g"),
+      navJump: async () => {
+        const n = await page.$$(".nav-item");
+        if (n.length) await pick(n).click({ timeout: 1500 }).catch(() => {});
+      },
+      palette: async () => {
+        await page.click("#palette-btn", { timeout: 1500 }).catch(() => {});
+        await page.keyboard.press("Escape");
+      },
+      minimal: () => page.keyboard.press("m"),
+      resize: () => page.setViewportSize(pick([{ width: 1366, height: 768 }, { width: 1100, height: 700 }, { width: 390, height: 844 }, { width: 1920, height: 1080 }])),
+      home: async () => {
+        await page.click("#home-btn", { timeout: 1500 }).catch(() => {});
+        await page.waitForTimeout(150);
+        await page.goto(`${BASE}/#/t/${TREE}`);
+      },
+    };
+    const names = Object.keys(acts);
+    const log = [];
+    for (let i = 0; i < N; i++) {
+      const name = pick(names);
+      log.push(name);
+      errors.length = 0;
+      await acts[name]().catch(() => {});
+      await page.waitForTimeout(200);
+      const bad = await page.evaluate(() => {
+        const out = [];
+        const de = document.documentElement;
+        if (de.scrollWidth - de.clientWidth > 1) out.push("horizontal overflow " + (de.scrollWidth - de.clientWidth));
+        const app = document.querySelector("#app");
+        if (app && app.classList.contains("active") && !document.body.classList.contains("minimal-chrome")) {
+          const h = document.querySelector("#app-header").getBoundingClientRect();
+          if (h.top < -1 || h.height < 40) out.push("header not visible");
+        }
+        return out;
+      });
+      if (bad.length || errors.length) return { ok: false, seed, step: i, action: name, issues: [...bad, ...errors], last: log.slice(-5) };
+    }
+    return { ok: true, seed, actions: N };
+  },
+};
+
+(async () => {
+  const fn = checks[CHECK];
+  if (!fn) {
+    console.log(JSON.stringify({ ok: false, error: "unknown check " + CHECK }));
+    process.exit(2);
+  }
+  const browser = await chromium.launch();
+  try {
+    const ctx = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+    const page = await ctx.newPage();
+    const errors = watch(page);
+    const result = await fn(page, errors);
+    if (result.ok && CHECK !== "monkey_seed" && errors.length) {
+      result.ok = false;
+      result.errors = errors;
+    }
+    console.log(JSON.stringify(result));
+  } catch (e) {
+    console.log(JSON.stringify({ ok: false, error: String(e && e.stack || e).slice(0, 800) }));
+  } finally {
+    await browser.close();
+  }
+})();

@@ -140,7 +140,16 @@ Other settings:
 uv run pytest -q
 ```
 
-The suite includes a parity test that runs the JavaScript zoom logic (`web/frontier.js`) in Node against its Python twin, so Node needs to be installed.
+The suite includes a parity test that runs the JavaScript zoom logic (`web/frontier.js`) in Node against its Python twin, so Node needs to be installed. It never calls a model.
+
+**Browser tests (opt-in).** `tests/e2e/` drives the real reader in Chromium with Playwright: zoom grows the visible words, the pinned passage drifts under 2 px, the map opens and jumps, column widths persist, the palette and highlights persist (and a poisoned `localStorage` is harmless), the overview card renders, a 390×844 phone layout does not overflow, and two seeded random-action runs. Each run starts its own server on a free port with a scratch data folder and a fake summariser, so it never touches your cache or calls a model.
+
+```bash
+npm install --no-save playwright && npx playwright install chromium   # once, in the repo folder
+RIEMANN_E2E=1 uv run pytest -q tests/e2e                              # about two minutes
+```
+
+They are skipped unless `RIEMANN_E2E=1` is set, and skipped with a message if Node, the `playwright` package or a Chromium build is missing. If Playwright lives somewhere else, point `RIEMANN_PLAYWRIGHT` at its folder (for example `~/.npm/_npx/<hash>/node_modules/playwright`).
 
 ## How it works
 
