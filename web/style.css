@@ -1797,7 +1797,25 @@ body.minimal-chrome #rail {
   opacity: 0;
   pointer-events: none;
   transform: translateY(-6px);
-  transition: opacity var(--transition-fast) ease, transform var(--transition-fast) ease;
+  /* Fade, then really hide: an invisible control must not stay in the Tab order or the
+     accessibility tree. */
+  visibility: hidden;
+  transition: opacity var(--transition-fast) ease, transform var(--transition-fast) ease,
+    visibility 0s linear var(--transition-fast);
+}
+
+/* In the zero-width side columns the rail and nav would otherwise spill out and
+   widen the page by their padding. */
+body.minimal-chrome #app.active .col-handle {
+  display: none;
+}
+
+body.minimal-chrome #rail,
+body.minimal-chrome #section-nav {
+  overflow: hidden;
+  padding: 0;
+  border-width: 0;
+  min-width: 0;
 }
 
 body.minimal-chrome #app.active {
