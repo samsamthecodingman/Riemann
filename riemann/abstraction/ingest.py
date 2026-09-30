@@ -58,16 +58,57 @@ def from_file(filename: str, content: bytes) -> tuple[str, str]:
     return (title, text)
 
 
+def _edge_key(line: str) -> str:
+    """A page line with its digits blanked, so "Page 3 of 12" and "Page 4 of 12"
+    are the same running header/footer."""
+    return re.sub(r"\d+", "#", line.strip().lower())
+
+
+def strip_running_headers(pages: list[str]) -> list[str]:
+    """Drop lines that repeat at the top or bottom of most pages (running
+    titles, "Page 3 of 12", confidential notices). A line counts when, digits
+    blanked, it appears within the first or last 2 lines of at least half the
+    pages (and at least 3). Needs 3+ pages; body lines are never touched, and
+    the first page's top lines (the document title) are kept."""
+    if len(pages) < 3:
+        return pages
+    edges: list[list[str]] = []
+    counts: dict[str, int] = {}
+    for page in pages:
+        lines = [ln for ln in page.split("\n") if ln.strip()]
+        keys = {_edge_key(ln) for ln in lines[:2] + lines[-2:] if len(ln.strip()) <= 120}
+        edges.append(lines)
+        for k in keys:
+            counts[k] = counts.get(k, 0) + 1
+    need = max(3, (len(pages) + 1) // 2)
+    repeated = {k for k, n in counts.items() if n >= need}
+    if not repeated:
+        return pages
+    out: list[str] = []
+    for pi, lines in enumerate(edges):
+        n = len(lines)
+        # The first page's top is kept: it is usually the document's own title,
+        # which the running header repeats.
+        kept = [
+            ln
+            for i, ln in enumerate(lines)
+            if not (((i < 2 and pi > 0) or i >= n - 2) and _edge_key(ln) in repeated and len(ln.strip()) <= 120)
+        ]
+        out.append("\n".join(kept))
+    return out
+
+
 def _from_pdf(filename: str, content: bytes) -> tuple[str, str]:
     from pypdf import PdfReader
 
     reader = PdfReader(io.BytesIO(content))
-    parts: list[str] = []
+    pages: list[str] = []
     for page in reader.pages:
         page_text = page.extract_text() or ""
         if page_text.strip():
-            parts.append(page_text.strip())
-    text = normalise_text("\n\n".join(parts))
+            pages.append(page_text.strip())
+    parts = strip_running_headers(pages)
+    text = normalise_text("\n\n".join(p for p in parts if p.strip()))
     title = _title_from_text(text, filename)
     return (title, text)
 

@@ -173,3 +173,25 @@ def test_binary_and_corrupt_uploads_are_refused_not_decoded():
     with pytest.raises(ValueError):
         ingest.from_file("x.pdf", b"%PDF-1.4 broken")
     assert ingest.from_file("n.txt", b"hello world")[1] == "hello world"
+
+
+def test_running_headers_and_page_numbers_are_stripped_from_pdf_pages():
+    topics = ["tides", "sediment", "harbour walls", "beach nourishment", "managed retreat"]
+    pages = []
+    for n, topic in enumerate(topics, 1):
+        body = f"This paragraph is about {topic} and says something specific in a full line of prose.\nAnd it continues with more on {topic}, in detail.\nA closing sentence about {topic}."
+        pages.append(f"Survey Report - CONFIDENTIAL\n{body}\nPage {n} of 5")
+    out = ingest.strip_running_headers(pages)
+    joined = "\n".join(out)
+    assert "CONFIDENTIAL" not in "\n".join(out[1:])
+    assert "Page " not in joined
+    assert "about sediment" in joined and joined.count("A closing sentence about") == 5
+    # page one keeps its top line (it is the document title)
+    assert out[0].startswith("Survey Report - CONFIDENTIAL")
+
+
+def test_short_documents_and_unique_lines_are_left_alone():
+    pages = ["Alpha line\nbody one\nOmega line", "Beta line\nbody two\nOmega line"]
+    assert ingest.strip_running_headers(pages) == pages  # under 3 pages
+    pages = [f"Heading {w}\nbody about {w}\nclosing on {w}" for w in ("cats", "dogs", "birds", "fish")]
+    assert ingest.strip_running_headers(pages) == pages  # nothing repeats
