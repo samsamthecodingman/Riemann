@@ -1080,7 +1080,7 @@
     const { frontier } = window.Frontier.frontierAtZ(state.tree, state.sequence, state.z);
     state.frontier = frontier;
 
-    const GESTURES = ["zkey", "ctrlwheel", "key"];
+    const GESTURES = ["zkey", "ctrlwheel", "key", "jump"];
     const bigJump = Math.abs(clamped - zFrom) > 0.15 && !GESTURES.includes(inputType);
     render({
       columnCrossfade: bigJump,
@@ -1425,21 +1425,50 @@
     jumpToNode(leafId);
   }
 
+  // Jump to a node (a section from the nav or "Up next", or a source
+  // paragraph from a ¶ link): open just enough for it to be on the page,
+  // never folding anything already open, then scroll it to the top of the
+  // reading area and flash its outline so it's obvious where you landed.
   function jumpToNode(nodeId) {
+    const tree = state.tree;
+    if (!tree || !tree.nodes[nodeId]) return;
     setAnchor(nodeId);
-    const path = [];
-    let n = state.tree.nodes[nodeId];
-    while (n && n.parent) {
-      path.push(n.parent);
-      n = state.tree.nodes[n.parent];
-    }
-    let neededK = 0;
-    path.forEach((id) => {
-      const idx = state.sequence.indexOf(id);
-      if (idx >= 0) neededK = Math.max(neededK, idx + 1);
-    });
+
     const total = Math.max(1, state.sequence.length);
-    setZ(neededK / total, "key");
+    let neededK = 0;
+    for (let p = tree.nodes[nodeId].parent; p; p = tree.nodes[p].parent) {
+      const idx = state.sequence.indexOf(p);
+      if (idx >= 0) neededK = Math.max(neededK, idx + 1);
+    }
+    if (neededK > window.Frontier.zToK(state.z, total)) setZ(neededK / total, "jump");
+
+    const isSection = sectionsOf(tree).includes(nodeId);
+    const target =
+      (isSection && $content.querySelector(`.section-block[data-section-id="${nodeId}"]`)) ||
+      $content.querySelector(`[data-node-id="${nodeId}"]`) ||
+      firstRenderedDescendant(nodeId);
+    if (!target) return;
+
+    state.lastDialChangeAt = Date.now() + 600; // don't let the scroll re-anchor mid-jump
+    const top = window.scrollY + target.getBoundingClientRect().top - contentTopY() - 8;
+    window.scrollTo({ top: Math.max(0, top), behavior: REDUCED_MOTION ? "auto" : "smooth" });
+
+    const block = target.matches("[data-node-id]") ? target : target.querySelector("[data-node-id]");
+    if (block) {
+      showPin(block.dataset.nodeId);
+      endPin(1200);
+    }
+    updateNavCurrent();
+    updateRail();
+  }
+
+  function firstRenderedDescendant(nodeId) {
+    const [s0, s1] = state.tree.nodes[nodeId].source_span;
+    for (const elNode of $content.querySelectorAll("[data-node-id]")) {
+      const n = state.tree.nodes[elNode.dataset.nodeId];
+      if (n && n.source_span[0] >= s0 && n.source_span[0] < s1) return elNode;
+    }
+    return null;
   }
 
   // ---------------------------------------------------------------------
