@@ -1803,11 +1803,6 @@
   // ---------------------------------------------------------------------
   // Click-to-jump to source (the ¶ label on summaries)
   // ---------------------------------------------------------------------
-  function firstNSentences(text, n) {
-    const parts = (text || "").match(/[^.!?]+[.!?]?/g) || [text];
-    return parts.slice(0, n).join(" ").trim();
-  }
-
   function jumpToLeaf(leafId) {
     logEvent("jump_source", { tree_id: state.tree.id, leaf_id: leafId });
     jumpToNode(leafId);
