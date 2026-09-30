@@ -27,6 +27,13 @@ _TERMINAL_RE = re.compile(r"[.!?][\"')\]”’]*$")
 _MD_STRUCT_RE = re.compile(r"^\s*(#{1,6}\s|[-*+]\s|\d{1,3}[.)]\s|>|\||```|~~~)")
 
 _CHAR_MAP = {
+    "ﬀ": "ff",  # typographic ligatures: LaTeX and Word PDFs extract "ﬁ" for "fi"
+    "ﬁ": "fi",
+    "ﬂ": "fl",
+    "ﬃ": "ffi",
+    "ﬄ": "ffl",
+    "ﬅ": "st",
+    "ﬆ": "st",
     "‐": "-",
     "‑": "-",  # non-breaking hyphen
     "‒": "-",

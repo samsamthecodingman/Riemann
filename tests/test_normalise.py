@@ -252,3 +252,10 @@ def test_dotted_numbered_headings_become_nested_markdown_headings():
     assert "\n\n### 2.1 Field work\n\nField surveys" in out
     assert "\n\n#### 2.1.1 Sampling\n\nField surveys" in out
     assert normalise_text(out) == out
+
+
+def test_typographic_ligatures_are_expanded():
+    src = "The classiﬁed, deﬁned and ﬂexible oﬃce staﬀ suﬃx ﬅ ﬆ"
+    out = normalise_text(src)
+    assert out == "The classified, defined and flexible office staff suffix st st"
+    assert normalise_text(out) == out
