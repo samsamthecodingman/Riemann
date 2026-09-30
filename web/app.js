@@ -1416,39 +1416,103 @@
     }
   });
 
-  // ---- Gesture 1: hold Z + move the mouse horizontally ----
+  // ---- Gesture 1: Z zoom. Hold Z and move the mouse horizontally, or tap Z
+  // for a sticky zoom mode driven by the mouse, a two-finger scroll or swipe.
+  // (On Linux the trackpad is ignored while a letter key is held, so "hold Z
+  // and move" cannot work there; a quick tap keeps the mode on instead.) ----
   const Z_STEP_PX = 24;
+  const Z_TAP_MS = 250; // released sooner than this: sticky mode
+  const Z_IDLE_MS = 1500; // sticky mode ends after this long with no zoom input
+  const Z_WHEEL_PX_PER_STEP = 40;
   let zHeld = false;
+  let zSticky = false;
+  let zDownAt = 0;
   let zStartX = null;
   let zAppliedSteps = 0;
   let zGestureY = null;
+  let zWheelAccum = 0;
+  let zIdleTimer = null;
+  const $zoomMode = el("zoom-mode");
+
+  function zoomModeTouch() {
+    if (!zSticky) return;
+    clearTimeout(zIdleTimer);
+    zIdleTimer = setTimeout(endZGesture, Z_IDLE_MS);
+  }
   function zMoveHandler(e) {
-    if (!zHeld || zStartX == null) return;
+    if ((!zHeld && !zSticky) || zStartX == null) return;
     const totalDeltaX = e.clientX - zStartX;
     const targetSteps = Math.trunc(totalDeltaX / Z_STEP_PX);
     const diff = targetSteps - zAppliedSteps;
     if (diff !== 0) {
       zAppliedSteps = targetSteps;
       queueLockedSteps(diff, "zkey", zGestureY);
+      zoomModeTouch();
     }
   }
+  // Sticky mode: two-finger scroll (wheel without Ctrl, either axis). Up or
+  // right expands, down or left collapses. Ctrl+wheel (pinch) is Gesture 2.
+  function zWheelHandler(e) {
+    if (!zSticky || e.ctrlKey) return;
+    e.preventDefault();
+    const dominantX = Math.abs(e.deltaX) > Math.abs(e.deltaY);
+    const raw = dominantX ? e.deltaX : -e.deltaY; // up / right positive
+    const unit = e.deltaMode === 1 ? 3 : e.deltaMode === 2 ? 1 / 3 : Z_WHEEL_PX_PER_STEP;
+    zWheelAccum += raw / unit;
+    const steps = Math.trunc(zWheelAccum);
+    if (steps !== 0) {
+      zWheelAccum -= steps;
+      queueLockedSteps(steps, "zkey", zGestureY);
+    }
+    zoomModeTouch();
+  }
+  function zPointerDown() {
+    if (zSticky) endZGesture();
+  }
+  function zEscape(e) {
+    if (zSticky && e.key === "Escape") endZGesture();
+  }
   function endZGesture() {
-    if (!zHeld) return;
+    if (!zHeld && !zSticky) return;
     zHeld = false;
+    zSticky = false;
     zStartX = null;
     zAppliedSteps = 0;
+    zWheelAccum = 0;
     zGestureY = null;
+    clearTimeout(zIdleTimer);
     endPin(350);
     document.body.classList.remove("zoom-drag-active");
+    if ($zoomMode) $zoomMode.hidden = true;
     window.removeEventListener("mousemove", zMoveHandler);
+    window.removeEventListener("wheel", zWheelHandler, { passive: false });
+    window.removeEventListener("pointerdown", zPointerDown, true);
+    window.removeEventListener("keydown", zEscape, true);
+  }
+  function beginStickyZ() {
+    zHeld = false;
+    zSticky = true;
+    zWheelAccum = 0;
+    if ($zoomMode) $zoomMode.hidden = false;
+    window.addEventListener("wheel", zWheelHandler, { passive: false });
+    window.addEventListener("pointerdown", zPointerDown, true);
+    window.addEventListener("keydown", zEscape, true);
+    zoomModeTouch();
   }
   document.addEventListener("keydown", (e) => {
     if (!$app.classList.contains("active")) return;
     if (e.key !== "z" && e.key !== "Z") return;
-    if (e.repeat || zHeld || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     const tag = (e.target.tagName || "").toLowerCase();
     if (tag === "input" || tag === "textarea") return;
+    if (zSticky) {
+      // another Z tap leaves the mode
+      if (!e.repeat) endZGesture();
+      return;
+    }
+    if (e.repeat || zHeld) return;
     zHeld = true;
+    zDownAt = performance.now();
     zStartX = lastMouse.x;
     zAppliedSteps = 0;
     zGestureY = beginPointerGesture(lastMouse.x, lastMouse.y);
@@ -1456,7 +1520,9 @@
     window.addEventListener("mousemove", zMoveHandler);
   });
   document.addEventListener("keyup", (e) => {
-    if (e.key === "z" || e.key === "Z") endZGesture();
+    if (e.key !== "z" && e.key !== "Z") return;
+    if (zHeld && performance.now() - zDownAt < Z_TAP_MS) beginStickyZ();
+    else if (zHeld) endZGesture();
   });
   window.addEventListener("blur", endZGesture);
 
@@ -2345,6 +2411,7 @@
   // Boot
   // ---------------------------------------------------------------------
   async function boot() {
+    if (window.RiemannCols) window.RiemannCols.init({ keepReadingPosition });
     if (window.RiemannMap) {
       window.RiemannMap.init({
         getTree: () => state.tree,

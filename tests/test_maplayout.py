@@ -21,8 +21,9 @@ global.window = {};
 eval(fs.readFileSync(process.argv[1], 'utf8'));
 const tree = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const sizes = JSON.parse(process.argv[3]);
+const density = process.argv[4] || undefined;
 const out = sizes.map(([W, H]) => {
-  const m = window.MapLayout.layout(tree, W, H);
+  const m = window.MapLayout.layout(tree, W, H, { density });
   return Object.fromEntries(m);
 });
 const words = window.MapLayout.wordsInSource(tree);
@@ -32,9 +33,9 @@ process.stdout.write(JSON.stringify({ layouts: out, words: Object.fromEntries(wo
 EPS = 0.01
 
 
-def run_layout(tree_path: Path, sizes):
+def run_layout(tree_path: Path, sizes, density=None):
     res = subprocess.run(
-        ["node", "-e", NODE_SCRIPT, str(LAYOUT_JS), str(tree_path), json.dumps(sizes)],
+        ["node", "-e", NODE_SCRIPT, str(LAYOUT_JS), str(tree_path), json.dumps(sizes)] + ([density] if density else []),
         capture_output=True, text=True, check=True,
     )
     return json.loads(res.stdout)
@@ -194,3 +195,77 @@ def test_tiny_containers_leave_children_unplaced(trees):
         r = layouts[sec]
         assert r["headerH"] > 0 or tree["nodes"][sec]["is_leaf"]
         assert all(c not in layouts for c in tree["nodes"][sec]["children"])
+
+
+def test_compact_density_is_deterministic_and_nested(trees):
+    for tree, path in trees:
+        a = run_layout(path, SIZES, "compact")
+        assert a == run_layout(path, SIZES, "compact")
+        for layouts in a["layouts"]:
+            for nid, r in layouts.items():
+                kids = [layouts[c] for c in tree["nodes"][nid]["children"] if c in layouts]
+                for i, k in enumerate(kids):
+                    assert contains(r, k)
+                    for other in kids[i + 1:]:
+                        assert not overlaps(k, other)
+
+
+def test_compact_section_header_reserves_numeral_and_at_most_two_lines(trees):
+    for tree, path in trees:
+        layouts = run_layout(path, [[1160, 1376], [300, 900]], "compact")["layouts"]
+        for lay in layouts:
+            for sec in tree["sections"]:
+                r = lay[sec]
+                if not r["headerH"]:
+                    continue
+                one = 8 + 22 + 4 + 17 + 8
+                two = 8 + 22 + 4 + 2 * 17 + 8
+                assert one - 0.01 <= r["headerH"] <= two + 0.01, (sec, r["headerH"])
+
+
+def test_compact_headers_are_smaller_than_full(trees):
+    tree, path = trees[0]
+    full = run_layout(path, [[1160, 1376]])["layouts"][0]
+    compact = run_layout(path, [[1160, 1376]], "compact")["layouts"][0]
+    for sec in tree["sections"]:
+        assert compact[sec]["headerH"] < full[sec]["headerH"]
+
+
+KEY_SCRIPT = """
+const fs = require('fs');
+global.window = {};
+eval(fs.readFileSync(process.argv[1], 'utf8'));
+const titles = JSON.parse(process.argv[2]);
+process.stdout.write(JSON.stringify(titles.map((t) => window.MapLayout.keyTitle({ title: t }, t))));
+"""
+
+
+def test_key_title_heuristic_and_short_title_preference():
+    titles = [
+        "How attention works in the ADHD brain today",
+        "Why the delay aversion shapes design",
+        "Fidgeting, COGA guidance and thin HCI evidence",
+        "Medication windows",
+        "The cost of context switching between tasks",
+        "Weak constructs and strong claims in research",
+    ]
+    res = subprocess.run(["node", "-e", KEY_SCRIPT, str(LAYOUT_JS), json.dumps(titles)],
+                         capture_output=True, text=True, check=True)
+    keys = json.loads(res.stdout)
+    assert keys[0] == "Attention works"
+    assert keys[1] == "Delay aversion shapes design"
+    for k, t in zip(keys, titles):
+        assert 0 < len(k.split()) <= 5
+        assert k.split()[-1].lower() not in {"and", "of", "the", "to", "in", "for"}
+        assert not k.lower().startswith(("how ", "why ", "the "))
+    assert keys[3] == "Medication windows"
+    # a "Noun and Noun" pair is kept whole when it fits in 5 words
+    assert keys[2] == "Fidgeting, COGA guidance and thin"
+    assert keys[5] == "Weak constructs and strong"
+
+
+def test_key_title_prefers_short_title():
+    script = KEY_SCRIPT.replace("{ title: t }", "{ title: t, short_title: 'Delay aversion' }")
+    res = subprocess.run(["node", "-e", script, str(LAYOUT_JS), json.dumps(["Some very long title that goes on"])],
+                         capture_output=True, text=True, check=True)
+    assert json.loads(res.stdout) == ["Delay aversion"]

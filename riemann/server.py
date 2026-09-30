@@ -92,6 +92,29 @@ async def api_tree(tree_id: str) -> dict:
     raise HTTPException(404, "no such tree")
 
 
+@app.post("/api/tree/{tree_id}/short-titles")
+async def api_short_titles(tree_id: str) -> dict:
+    """Backfill short_title for trees built before the field existed: one
+    batched model call for every node from the section level down that lacks
+    one. Writes the tree back to the cache; returns every short title now set
+    below the sections, as {"titles": {node_id: label}, "added": n}."""
+    builder = build.get_builder(tree_id)
+    if builder is not None and builder.tree.status == "building":
+        raise HTTPException(409, "tree is still building")
+    tree = builder.tree if builder is not None else cache.load_tree(tree_id)
+    if tree is None:
+        raise HTTPException(404, "no such tree")
+    added: dict[str, str] = {}
+    if build.nodes_missing_short_title(tree):
+        try:
+            added = await build.backfill_short_titles(tree, get_summariser(model=default_model()))
+        except Exception as exc:  # noqa: BLE001 - the map falls back to heuristic titles
+            raise HTTPException(502, f"could not generate short titles: {type(exc).__name__}") from exc
+        if added:
+            cache.save_tree(tree)
+    return {"titles": build.short_titles_below_sections(tree), "added": len(added)}
+
+
 @app.get("/api/tree/{tree_id}/events")
 async def api_tree_events(tree_id: str) -> EventSourceResponse:
     builder = build.get_builder(tree_id)

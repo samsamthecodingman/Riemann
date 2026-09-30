@@ -125,3 +125,35 @@ Signature: `layout(tree, W, H, opts) -> Map<nodeId, {x, y, w, h, headerH, side}>
   - No text below 13 px on tiles, and no text overflowing tiles (check programmatically: `scrollHeight > clientHeight` on tiles with visible text).
   - The 390×844 sheet works. No console errors. Reduced motion is honoured.
 - Commit with a clear message ending in `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`, and push to origin master.
+
+## Compact density and resizable columns (2026-09-30, laptop feedback)
+Sam's feedback: the map was unreadable on a 1366x768 laptop (clipped text, too wide), and the columns could not be resized.
+
+**Density** (`web/map.js`, `web/maplayout.js`):
+- The map picks its density from the panel's current pixel width: below `FULL_MIN_W` (520 px) it is **compact**, otherwise **full**. Dragging the column handle changes it live.
+- **Compact** shows a district's NN numeral (22 px) and a **key title** of at most 2 lines. There is no meta line and no hook. Deeper tiles show a one-line key title only, or no text if a full line does not fit (the `aria-label` keeps the whole title, and a `title` tooltip is set whenever the tile does not show it whole).
+- **Full** is the A2 rendering above, but hooks and titles only appear when they fit whole.
+- Text is never clipped mid-word. Each label tries its variants best first, then cuts the key title at a word boundary with an ellipsis (binary search on the word count), then falls back to the numeral or to nothing.
+- **Key title** is `node.short_title`; else a client-side heuristic (`MapLayout.keyTitle`: drop leading How/Why/What/The/A/An, take up to 4 words, keep a "Noun and Noun" pair whole within 5 words, never end on a stop word).
+- `layout(tree, W, H, {density})` reserves the compact header: section `8 + 22 + 4 + lines*17 + 8` (lines <= 2, no meta), deeper `8 + 17 + 8`. It stays pure and deterministic (`tests/test_maplayout.py`).
+- The default map column is `clamp(280px, 24vw, 460px)`.
+- Map text is always full-contrast `var(--text)` or `var(--muted)`. The tile fade-in animation was removed, because a tile caught mid-fade looked washed out.
+
+**Short-title backfill:**
+- `POST /api/tree/{id}/short-titles` makes one batched model call (`default_model()`) for every node from the section level down that has no `short_title`. It validates each label (at most 3 words and 24 characters), writes the tree back to the cache, and returns `{titles, added}`.
+- The map calls it once per tree per session, when it is open on a tree whose sections lack titles. A localStorage flag `riemann:short-titles:<id>` records success. Failures are silent.
+- `SCHEMA_VERSION` is not bumped.
+
+**Resizable columns** (`web/cols.js`), desktop only (>= 1100 px):
+- A drag handle sits between the left column (SECTIONS nav, or the map) and the reader, and another between the reader and the right rail when the rail is showing.
+- The handles use pointer capture, are `role="separator"` with `aria-valuenow/min/max`, and are focusable. Left/Right move them 16 px (Shift: 64 px), and Enter or double-click resets to the default.
+- Limits are: nav 160-420, map 220-720, rail 200-420, and the reader keeps at least 480 px.
+- Widths live in `--col-left` and `--col-rail` on `#app`, stored separately for map open and closed in `localStorage['riemann:cols']`. A window resize re-clamps without writing.
+- Dragging holds the reading position with `keepReadingPosition` (measured drift is under 0.3 px) and redraws the map via `RiemannMap.update()` (rAF-throttled).
+
+**Z zoom on a trackpad** (`web/app.js`, Gesture 1):
+- Linux libinput "disable while typing" ignores the touchpad while a letter key is held, so "hold Z and move" never receives movement there.
+- **Holding Z** for 250 ms or more works as before, and ends on keyup.
+- **Tapping Z** (released in under 250 ms) turns on a sticky zoom mode with the same pin as at keydown. While it is on, horizontal pointer movement (24 px per step) and two-finger scroll or swipe (wheel without Ctrl, either axis; up or right expands, down or left collapses; about 40 px per step, 3 lines per step) zoom via `queueLockedSteps(..., "zkey", ...)`, and wheel `preventDefault` stops the page scrolling. A small "Zoom mode: scroll or swipe · Z to exit" pill is shown, and `body.zoom-drag-active` stays on.
+- The mode ends on another Z tap, Esc, a pointerdown, 1.5 s with no zoom input, or window blur, each running `endPin(350)`.
+- Pinch still arrives as Ctrl+wheel (Gesture 2) and is unchanged.

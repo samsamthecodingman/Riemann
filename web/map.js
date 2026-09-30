@@ -16,8 +16,11 @@
   const STORE_KEY = "riemann:map";
   const MIN_S = 1;
   const MAX_S = 6;
-  const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const wideMQ = window.matchMedia("(min-width: 1100px)");
+  // The map panel switches from compact ("key titles") to full density at
+  // this pixel width. Chosen from the panel's current width, so dragging the
+  // column handle changes it live.
+  const FULL_MIN_W = 520;
 
   let api = null;
   let $app, $panel, $frame, $world, $sub, $btn, $pill;
@@ -30,6 +33,7 @@
   let treeId = null;
   let lay = null; // Map<id, rect> for the current (W*s, H*s)
   let layKey = "";
+  let density = "compact";
   let drawn = []; // tiles in paint order: {key, id, kind, r}
   let drawnById = new Map(); // node id -> tile
   const els = new Map(); // tile key -> button
@@ -52,6 +56,42 @@
     try {
       localStorage.setItem(STORE_KEY, v ? "1" : "0");
     } catch (e) {}
+  }
+
+  // ------------------------------------------------------------------
+  // Short-title backfill: trees built before `short_title` existed get their
+  // key titles from one batched call (POST /api/tree/{id}/short-titles), once
+  // per tree per session. Failures are silent; the map keeps the heuristic
+  // key titles.
+  // ------------------------------------------------------------------
+  const backfillTried = new Set();
+  const BACKFILL_KEY = (id) => `riemann:short-titles:${id}`;
+
+  function maybeBackfill() {
+    const tree = api.getTree();
+    if (!tree || !isOpen || backfillTried.has(tree.id)) return;
+    const secs = api.sectionsOf(tree);
+    if (!secs.length || secs.every((id) => tree.nodes[id] && tree.nodes[id].short_title)) return;
+    try {
+      if (localStorage.getItem(BACKFILL_KEY(tree.id)) === "1") return;
+    } catch (e) {}
+    backfillTried.add(tree.id);
+    fetch(`/api/tree/${encodeURIComponent(tree.id)}/short-titles`, { method: "POST" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data || !data.titles) return;
+        const cur = api.getTree();
+        if (!cur || cur.id !== tree.id) return;
+        for (const [id, t] of Object.entries(data.titles)) if (cur.nodes[id] && !cur.nodes[id].short_title) cur.nodes[id].short_title = t;
+        try {
+          localStorage.setItem(BACKFILL_KEY(tree.id), "1");
+        } catch (e) {}
+        lay = null;
+        layKey = "";
+        for (const b of els.values()) b._sig = null;
+        scheduleRedraw();
+      })
+      .catch(() => {});
   }
 
   // ------------------------------------------------------------------
@@ -101,11 +141,16 @@
     }
   }
 
+  function computeDensity() {
+    const pw = $panel.offsetWidth;
+    return pw >= FULL_MIN_W ? "full" : "compact";
+  }
+
   function getLayout() {
     const tree = api.getTree();
-    const key = `${tree.id}|${Math.round(W * s * 10)}|${Math.round(H * s * 10)}`;
+    const key = `${tree.id}|${Math.round(W * s * 10)}|${Math.round(H * s * 10)}|${density}`;
     if (key !== layKey || !lay) {
-      lay = window.MapLayout.layout(tree, W * s, H * s, { titleOf: (n) => api.nodeTitle(n) });
+      lay = window.MapLayout.layout(tree, W * s, H * s, { titleOf: (n) => api.nodeTitle(n), density });
       layKey = key;
     }
     return lay;
@@ -167,24 +212,35 @@
 
   // ------------------------------------------------------------------
   // Label variants, best first. Each tile is fitted by trying them in
-  // order and keeping the first that does not overflow its box.
+  // order and keeping the first that fits its box whole. If none does, the
+  // one-line key title is cut at a word boundary with an ellipsis (`trunc`);
+  // failing that the tile shows no text (or, for a district, just its numeral).
+  // Text is never clipped mid-word.
   // ------------------------------------------------------------------
   function titleOf(n) {
     return api.nodeTitle(n);
   }
 
+  function keyOf(n) {
+    return window.MapLayout.keyTitle(n, titleOf(n));
+  }
+
   function partVariants(tile) {
     const n = tile.node;
     const title = titleOf(n);
+    const key = keyOf(n);
+    if (density === "compact") {
+      const line = (t) => `<span class="map-line">${esc(t)}</span>`;
+      return { list: [line(key), ""], trunc: { text: key, html: line } };
+    }
     const prov = tile.kind === "leaf" ? api.nodeProvenance(n) : "";
     const pre = prov ? `<span class="map-prov">${esc(prov)}</span> ` : "";
+    const line = (t) => `${pre}<span class="map-line">${esc(t)}</span>`;
     const list = [];
     list.push(`${pre}<span class="map-title">${esc(title)}</span>`);
     if (n.short_title && n.short_title !== title) list.push(`${pre}<span class="map-title">${esc(n.short_title)}</span>`);
-    list.push(`${pre}<span class="map-line">${esc(n.short_title || title)}</span>`);
-    if (prov) list.push(`<span class="map-prov">${esc(prov)}</span>`);
-    list.push("");
-    return list;
+    list.push(line(key));
+    return { list, trunc: { text: key, html: line }, tail: prov ? [`<span class="map-prov">${esc(prov)}</span>`, ""] : [""] };
   }
 
   function sectionVariants(tile, tree) {
@@ -192,29 +248,33 @@
     const secs = api.sectionsOf(tree);
     const i = Math.max(0, secs.indexOf(tile.id));
     const title = titleOf(n);
+    const key = keyOf(n);
+    const num = `<span class="map-num">${nn(i)}</span>`;
+    const t = (x) => `<span class="map-title">${esc(x)}</span>`;
+    if (density === "compact") {
+      return { list: [`${num}${t(key)}`], trunc: { text: key, html: (x) => `${num}${t(x)}` }, tail: [num, ""] };
+    }
     const words = window.MapLayout.wordsInSource(tree).get(tile.id) || n.words || 0;
     const parts = (n.children || []).length;
     const meta = parts ? `${parts} part${parts === 1 ? "" : "s"} · ${Math.round(words).toLocaleString()} words` : `${Math.round(words).toLocaleString()} words`;
-    const num = `<span class="map-num">${nn(i)}</span>`;
-    const t = (x) => `<span class="map-title">${esc(x)}</span>`;
-    const one = `<span class="map-title map-line">${esc(n.short_title || title)}</span>`;
     const m = `<span class="map-meta">${esc(meta)}</span>`;
     const list = [];
     if (tile.kind === "sec-solid" && n.hook) list.push(`${num}${t(title)}${m}<span class="map-hook">${esc(n.hook)}</span>`);
     list.push(`${num}${t(title)}${m}`);
     list.push(`${num}${t(title)}`);
     if (n.short_title && n.short_title !== title) list.push(`${num}${t(n.short_title)}`);
-    list.push(`${num}${one}`);
-    list.push(num);
-    return list;
+    else if (key !== title) list.push(`${num}${t(key)}`);
+    return { list, trunc: { text: key, html: (x) => `${num}${t(x)}` }, tail: [num, ""] };
   }
 
   // Box (in px) the label may occupy, and the label's width.
   function labelBox(tile) {
     const { r } = tile;
-    if (tile.kind === "sec-solid") return { w: r.w - 28, h: r.h - 22 };
+    const c = density === "compact";
+    if (tile.kind === "sec-solid") return c ? { w: r.w - 24, h: r.h - 16 } : { w: r.w - 28, h: r.h - 22 };
     if (tile.kind === "sec-frame") {
       const hw = r.side ? Math.min(200, 0.35 * r.w) : r.w;
+      if (c) return { w: hw - 24, h: r.side ? r.h - 16 : r.headerH - 16 };
       return { w: hw - 28, h: r.side ? r.h - 22 : r.headerH - 22 };
     }
     if (tile.kind === "frame") {
@@ -236,17 +296,13 @@
     const label = document.createElement("span");
     label.className = tile.kind.startsWith("sec") ? "map-head" : "map-label";
     b.appendChild(label);
-    if (!REDUCED) {
-      b.classList.add("map-enter");
-      b.addEventListener("animationend", () => b.classList.remove("map-enter"), { once: true });
-    }
     return b;
   }
 
   function styleTile(b, tile, tree) {
     const { r, kind } = tile;
     const isSec = kind.startsWith("sec");
-    b.className = `map-tile map-${kind}${b.classList.contains("map-enter") ? " map-enter" : ""}${b.classList.contains("here") ? " here" : ""}`;
+    b.className = `map-tile map-${kind}${b.classList.contains("here") ? " here" : ""}`;
     b.style.left = `${r.x}px`;
     b.style.top = `${r.y}px`;
     b.style.width = `${r.w}px`;
@@ -281,6 +337,13 @@
     }
     measure();
     if (W < 20 || H < 20) return;
+    const nd = computeDensity();
+    if (nd !== density) {
+      density = nd;
+      lay = null;
+      for (const b of els.values()) b._sig = null;
+    }
+    $panel.classList.toggle("compact", density === "compact");
     clampCamera();
     const L = getLayout();
     drawn = collectTiles(tree, L);
@@ -299,7 +362,7 @@
         els.set(tile.key, b);
       }
       const box = labelBox(tile);
-      const sig = `${Math.round(tile.r.w * 10)}|${Math.round(tile.r.h * 10)}|${Math.round(tile.r.headerH)}|${tile.r.side}|${box.w > 0}`;
+      const sig = `${density}|${Math.round(tile.r.w * 10)}|${Math.round(tile.r.h * 10)}|${Math.round(tile.r.headerH)}|${tile.r.side}|${box.w > 0}`;
       const changed = b._sig !== sig;
       if (changed || fresh || b._x !== tile.r.x || b._y !== tile.r.y) {
         styleTile(b, tile, tree);
@@ -309,7 +372,7 @@
       if (changed || fresh) {
         b._sig = sig;
         b._tile = tile;
-        refit.push({ b, tile, variants: tile.kind.startsWith("sec") ? sectionVariants(tile, tree) : partVariants(tile), idx: 0 });
+        refit.push({ b, tile, v: tile.kind.startsWith("sec") ? sectionVariants(tile, tree) : partVariants(tile) });
       } else {
         b._tile = tile;
       }
@@ -330,32 +393,53 @@
     applyHere();
   }
 
-  // Try each label variant in order; keep the first whose label fits its box.
-  function fitLabels(entries) {
-    let pending = entries;
-    for (const e of pending) e.b.firstChild.innerHTML = e.variants[0];
-    for (let pass = 0; pass < 6 && pending.length; pass++) {
-      const failing = [];
-      for (const e of pending) {
-        const l = e.b.firstChild;
-        const over = l.scrollHeight > l.clientHeight + 0.5 || l.scrollWidth > l.clientWidth + 0.5;
-        if (over && e.idx < e.variants.length - 1) failing.push(e);
-      }
-      for (const e of failing) {
-        e.idx += 1;
-        e.b.firstChild.innerHTML = e.variants[e.idx];
-      }
-      pending = failing;
+  const overflows = (l) => l.scrollHeight > l.clientHeight + 0.5 || l.scrollWidth > l.clientWidth + 0.5;
+
+  // Try each label variant in order; keep the first that fits its box whole.
+  // Otherwise cut the key title at a word boundary (binary search on the word
+  // count), otherwise fall back to the tail (numeral / provenance / nothing).
+  function fitOne(e) {
+    const l = e.b.firstChild;
+    const { list, trunc, tail } = e.v;
+    for (const html of list) {
+      l.innerHTML = html;
+      if (!overflows(l)) return;
     }
+    if (trunc) {
+      const words = trunc.text.split(/\s+/).filter(Boolean);
+      const cutHtml = (k) => trunc.html(words.slice(0, k).join(" ").replace(/[\s,;:.\-\u2013\u2014]+$/, "") + "\u2026");
+      let lo = 1;
+      let hi = words.length - 1;
+      let best = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        l.innerHTML = cutHtml(mid);
+        if (!overflows(l)) {
+          best = mid;
+          lo = mid + 1;
+        } else hi = mid - 1;
+      }
+      if (best) {
+        l.innerHTML = cutHtml(best);
+        return;
+      }
+    }
+    for (const html of tail || [""]) {
+      l.innerHTML = html;
+      if (!html || !overflows(l)) return;
+    }
+    l.innerHTML = "";
+  }
+
+  function fitLabels(entries) {
     for (const e of entries) {
+      fitOne(e);
       const l = e.b.firstChild;
       e.b._lh = l.offsetHeight;
       e.b._lw = l.offsetWidth;
-      // last resort: never leave overflowing text behind
-      if (l.scrollHeight > l.clientHeight + 0.5 || l.scrollWidth > l.clientWidth + 0.5) {
-        const v = e.variants;
-        l.innerHTML = e.tile.kind.startsWith("sec") ? v[v.length - 1] : "";
-      }
+      // tooltip when the tile does not show the whole title
+      const full = titleOf(e.tile.node);
+      e.b.title = l.textContent.includes(full) ? "" : full;
     }
   }
 
@@ -417,9 +501,10 @@
       px = r.x + r.w - pw - 8;
       py = r.y + r.h - ph - 8;
     } else {
-      // Small tile: hang the pill just above it, left-aligned, inside the map.
+      // Small tile: hang the pill just below it (or above when there is no
+      // room), left-aligned, inside the map, so it does not cover a label.
       px = Math.min(r.x, W * s - pw - 2);
-      py = r.y - ph - 2;
+      py = r.y + r.h + 2 + ph <= H * s ? r.y + r.h + 2 : r.y - ph - 2;
     }
     $pill.style.left = `${Math.max(2, px)}px`;
     $pill.style.top = `${Math.max(2, py)}px`;
@@ -556,6 +641,7 @@
     $app.classList.toggle("map-open", isOpen);
     $panel.hidden = !isOpen;
     $btn.setAttribute("aria-pressed", String(isOpen));
+    if (window.RiemannCols) window.RiemannCols.refresh();
   }
 
   function setOpen(v, opts) {
@@ -571,6 +657,7 @@
     if (v) {
       lastHereKeys = "";
       redraw();
+      maybeBackfill();
       if (!wideMQ.matches) $panel.querySelector("#map-close").focus();
     } else if (!wideMQ.matches && opts.restoreFocus !== false) {
       $btn.focus();
@@ -600,6 +687,7 @@
     }
     if (!isOpen) return;
     scheduleRedraw();
+    maybeBackfill();
   }
 
   function init(a) {

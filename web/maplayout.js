@@ -58,6 +58,36 @@
     return memo;
   }
 
+  // ---- key titles (compact density) ------------------------------------
+  const LEAD_FILLER = new Set(["how", "why", "what", "when", "the", "a", "an"]);
+  const TRAIL_STOP = new Set(["and", "or", "of", "to", "for", "in", "on", "with", "by", "at", "the", "a", "an", "as", "is", "are", "vs", "from"]);
+  const isAnd = (w) => /^(and|&|or)$/i.test(w || "");
+
+  // A short label for a node: its short_title if it has one, else the first
+  // few meaningful words of the title (no leading articles or filler, never
+  // splitting a "Noun and Noun" pair when it fits in 5 words, never ending on
+  // a dangling stop word). Pure and deterministic.
+  function keyTitle(node, fullTitle) {
+    if (node && node.short_title) return node.short_title;
+    const title = (fullTitle != null ? fullTitle : defaultTitle(node)).replace(/\s+/g, " ").trim();
+    let words = title.split(" ").filter(Boolean);
+    while (words.length > 1 && LEAD_FILLER.has(words[0].toLowerCase().replace(/[^a-z]/g, ""))) words.shift();
+    if (words.length <= 4) return finishKey(words, title);
+    let cut = 4;
+    if (isAnd(words[cut - 1])) cut = 5; // "Noun and" + Noun
+    else if (isAnd(words[cut]) && words.length > cut + 1) cut = 3; // Noun | and Noun: pair would need 6
+    const out = words.slice(0, cut);
+    return finishKey(out, title);
+  }
+
+  function finishKey(words, fallback) {
+    const out = words.slice();
+    while (out.length > 1 && TRAIL_STOP.has(out[out.length - 1].toLowerCase().replace(/[^a-z&]/g, ""))) out.pop();
+    let t = out.join(" ").replace(/[\s,;:\-\u2013\u2014.?!]+$/, "");
+    if (!t) t = fallback;
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  }
+
   function titleLines(text, width, fontPx) {
     const perLine = Math.max(1, (width - 28) / (fontPx * 0.62));
     return Math.max(1, Math.ceil((text || "").length / Math.max(1, perLine)));
@@ -141,12 +171,15 @@
    * @param {object} tree - Tree JSON (nodes, root, sections).
    * @param {number} W - map width in px.
    * @param {number} H - map height in px.
-   * @param {object} [opts] - { titleOf(node) -> string }
+   * @param {object} [opts] - { titleOf(node) -> string, density: "compact"|"full" }
+   *   Compact reserves a smaller header (numeral + at most 2 title lines, no
+   *   meta line) and sizes it from the key title.
    * @returns {Map<string, {x:number,y:number,w:number,h:number,headerH:number,side:boolean}>}
    */
   function layout(tree, W, H, opts) {
     opts = opts || {};
     const titleOf = opts.titleOf || defaultTitle;
+    const compact = opts.density === "compact";
     const nodes = tree.nodes;
     const words = wordsInSource(tree);
     const out = new Map();
@@ -169,8 +202,15 @@
       // that would leave a header narrower than ~84px, where titles cannot fit.)
       const side = w > 1.8 * h && w >= 240;
       const hw = side ? Math.min(200, 0.35 * w) : w;
-      const lines = titleLines(titleOf(n), hw, level === 0 ? 15 : 13);
-      const headerH = level === 0 ? 12 + 36 + 6 + lines * 19.5 + 6 + 17 + 10 : 8 + lines * 17 + 8;
+      let headerH;
+      if (compact) {
+        // numeral 22 + key title (<= 2 lines at the top level, 1 below); no meta.
+        const lines = Math.min(level === 0 ? 2 : 1, titleLines(keyTitle(n, titleOf(n)), hw, level === 0 ? 14 : 13));
+        headerH = level === 0 ? 8 + 22 + 4 + lines * 17 + 8 : 8 + 17 + 8;
+      } else {
+        const lines = titleLines(titleOf(n), hw, level === 0 ? 15 : 13);
+        headerH = level === 0 ? 12 + 36 + 6 + lines * 19.5 + 6 + 17 + 10 : 8 + lines * 17 + 8;
+      }
       rect.headerH = headerH;
       rect.side = side;
       let cx, cy, cw, ch;
@@ -196,5 +236,5 @@
     return out;
   }
 
-  window.MapLayout = { layout, wordsInSource, strips };
+  window.MapLayout = { layout, wordsInSource, strips, keyTitle };
 })();

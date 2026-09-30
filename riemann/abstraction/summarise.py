@@ -254,6 +254,7 @@ _GOAL_TITLE_PREFIX = {
 
 _TARGET_RE = re.compile(r"Target length: about (\d+) words")
 _CHILD_IDS_RE = re.compile(r"^Child ids \(in order\): (.*)$", re.MULTILINE)
+_SHORT_IDS_RE = re.compile(r"^Short-title node ids: (.*)$", re.MULTILINE)
 _LEAF_IDS_RE = re.compile(r"^Leaf ids you may cite \(in order\): (.*)$", re.MULTILINE)
 
 
@@ -279,6 +280,12 @@ class FakeSummariser:
 
     async def summarise(self, prompt: str, system: str) -> str:
         combined = system + "\n" + prompt
+
+        # Short-title backfill (build.backfill_short_titles): {node_id: label}.
+        short_match = _SHORT_IDS_RE.search(prompt)
+        if short_match:
+            ids = [x for x in short_match.group(1).split(", ") if x]
+            return json.dumps({nid: f"Part {nid[-4:]}" for nid in ids})
 
         leaf_match = _LEAF_IDS_RE.search(prompt)
         leaf_ids = [x for x in leaf_match.group(1).split(", ") if x] if leaf_match else []

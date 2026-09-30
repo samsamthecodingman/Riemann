@@ -84,7 +84,7 @@
         <div class="how-card" style="--how: var(--sec-2)">
           <span class="how-num">02</span>
           <h2>Zoom where you look</h2>
-          <p>Hold <kbd>Z</kbd> and move the mouse over a passage to open it up or fold it away.</p>
+          <p>Hold <kbd>Z</kbd> and move the mouse over a passage to open it up or fold it away. On a trackpad, tap <kbd>Z</kbd>, then scroll or swipe.</p>
         </div>
         <div class="how-card" style="--how: var(--sec-4)">
           <span class="how-num">03</span>
@@ -173,7 +173,7 @@
     <span class="nav-label">SECTIONS</span>
     <div id="nav-items"></div>
     <div class="nav-spacer"></div>
-    <p class="nav-hint">Hold <strong>Z</strong> and move the mouse over any passage to open it up or fold it away.</p>
+    <p class="nav-hint">Hold <strong>Z</strong> and move the mouse over any passage to open it up or fold it away. On a trackpad, tap <strong>Z</strong>, then scroll.</p>
   </nav>
 
   <section id="map-panel" aria-label="Document map" hidden>
@@ -196,6 +196,9 @@
   <div id="content" role="feed" aria-label="Document content"></div>
 
   <aside id="rail" aria-label="Section details"></aside>
+
+  <div id="col-handle-left" class="col-handle" role="separator" aria-orientation="vertical" aria-label="Resize the left column" tabindex="0"></div>
+  <div id="col-handle-rail" class="col-handle" role="separator" aria-orientation="vertical" aria-label="Resize the right rail" tabindex="0"></div>
 
 
   <div id="highlight-toolbar" role="toolbar" aria-label="Highlight colour" hidden></div>
@@ -231,8 +234,10 @@
   </footer>
 
   <div id="zoom-hint" hidden>
-    Hold <kbd>Z</kbd> and move the mouse &rarr; for more detail, &larr; for less &middot; Ctrl+scroll works too
+    Hold <kbd>Z</kbd> and move the mouse &rarr; for more detail, &larr; for less &middot; or tap <kbd>Z</kbd>, then scroll &middot; Ctrl+scroll works too
   </div>
+
+  <div id="zoom-mode" role="status" hidden>Zoom mode: scroll or swipe &middot; Z to exit</div>
 
   <button id="minimal-toggle" title="Toggle minimal chrome (m)" aria-label="Toggle minimal chrome">&#9670;</button>
 </div>
@@ -243,6 +248,7 @@
 <script src="frontier.js"></script>
 <script src="maplayout.js"></script>
 <script src="map.js"></script>
+<script src="cols.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

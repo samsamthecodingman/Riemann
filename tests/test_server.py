@@ -164,3 +164,39 @@ async def test_models_endpoint_filters(monkeypatch):
         data = (await client.get("/api/models")).json()
         assert data["default"]
         assert data["models"] == [{"id": "claude-sonnet-5-5", "provider": "anthropic"}]
+
+
+async def test_short_titles_backfill_fills_missing_and_persists():
+    async with await _client() as client:
+        resp = await client.post("/api/abstract", json={"text": "# Doc\n\n" + "word " * 1500})
+        tree_id = resp.json()["tree_id"]
+        await _wait_for_done(tree_id)
+        build.BUILDS.clear()  # as after a server restart: the tree comes from the cache
+
+        tree = cache.load_tree(tree_id)
+        assert tree.sections
+        for n in tree.nodes.values():
+            n.short_title = None
+        cache.save_tree(tree)
+
+        resp = await client.post(f"/api/tree/{tree_id}/short-titles")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["added"] > 0
+        assert set(tree.sections) <= set(body["titles"])
+        for label in body["titles"].values():
+            assert 0 < len(label.split()) <= 3 and len(label) <= 24
+
+        saved = cache.load_tree(tree_id)
+        for sid in tree.sections:
+            assert saved.nodes[sid].short_title == body["titles"][sid]
+
+        again = await client.post(f"/api/tree/{tree_id}/short-titles")
+        assert again.json()["added"] == 0
+        assert again.json()["titles"] == body["titles"]
+
+
+async def test_short_titles_backfill_unknown_tree_is_404():
+    async with await _client() as client:
+        resp = await client.post("/api/tree/doesnotexist/short-titles")
+        assert resp.status_code == 404

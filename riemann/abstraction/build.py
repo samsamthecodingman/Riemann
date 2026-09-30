@@ -283,6 +283,83 @@ def _clean_child_short_titles(raw: object, valid_child_ids: list[str]) -> dict[s
     return out
 
 
+SHORT_TITLE_BACKFILL_SYSTEM = (
+    "You label the parts of a document for a small map. For each node id you are given, return a short key "
+    "phrase (at most 3 words and 24 characters) that names what the part is about. It must be a meaningful "
+    "phrase, not the first words of the title cut off, and not a sentence. Reply with JSON only: an object "
+    "mapping each node id to its label."
+)
+SHORT_TITLE_BACKFILL_MAX_NODES = 400
+
+
+def nodes_missing_short_title(tree: Tree) -> list[str]:
+    """Ids from the section level down (document order) with no short_title."""
+    top = [i for i in (tree.sections or []) if i in tree.nodes]
+    if not top and tree.root in tree.nodes:
+        root = tree.nodes[tree.root]
+        top = [c for c in root.children if c in tree.nodes] or [tree.root]
+    out: list[str] = []
+
+    def visit(node_id: str) -> None:
+        node = tree.nodes.get(node_id)
+        if node is None:
+            return
+        if not node.short_title:
+            out.append(node_id)
+        for c in node.children:
+            visit(c)
+
+    for i in top:
+        visit(i)
+    return out
+
+
+def short_titles_below_sections(tree: Tree) -> dict[str, str]:
+    """{id: short_title} for every node from the section level down that has one."""
+    have = set(nodes_missing_short_title(tree))
+    top = [i for i in (tree.sections or []) if i in tree.nodes]
+    seen: dict[str, str] = {}
+
+    def visit(node_id: str) -> None:
+        node = tree.nodes.get(node_id)
+        if node is None:
+            return
+        if node.short_title and node_id not in have:
+            seen[node_id] = node.short_title
+        for c in node.children:
+            visit(c)
+
+    for i in top or [tree.root]:
+        visit(i)
+    return seen
+
+
+async def backfill_short_titles(tree: Tree, summariser: Summariser) -> dict[str, str]:
+    """One batched model call for every node (section level down) that lacks a
+    short_title. Validates each label with _clean_short_title and writes the
+    valid ones onto the tree in place. Returns the labels that were added."""
+    ids = nodes_missing_short_title(tree)[:SHORT_TITLE_BACKFILL_MAX_NODES]
+    if not ids:
+        return {}
+    lines = []
+    for i in ids:
+        n = tree.nodes[i]
+        title = n.title or " ".join(n.text.split()[:12])
+        excerpt = " ".join((n.hook or n.text).split())[:140]
+        lines.append(f"- {i} | title: {title} | about: {excerpt}")
+    prompt = "Short-title node ids: " + ", ".join(ids) + "\n\nNodes:\n" + "\n".join(lines)
+    result = await _call_summariser_json(summariser, prompt, SHORT_TITLE_BACKFILL_SYSTEM)
+    if isinstance(result.get("titles"), dict):
+        result = result["titles"]
+    added: dict[str, str] = {}
+    for i in ids:
+        cleaned = _clean_short_title(result.get(i))
+        if cleaned:
+            tree.nodes[i].short_title = cleaned
+            added[i] = cleaned
+    return added
+
+
 def _clean_hook(raw: object) -> str | None:
     if not isinstance(raw, str) or not raw.strip():
         return None
