@@ -36,7 +36,9 @@
     z: 0,
     sequence: [],
     frontier: [],
+    prose: new Set(), // internal nodes shown as their summary paragraph; others on the page are in skim form
     anchorNodeId: null,
+    sequenceAnchor: null,
     anchorOffset: null,
     minimalChrome: false,
     eventSource: null,
@@ -250,11 +252,29 @@
   // ---------------------------------------------------------------------
   // Word / reading-time helpers
   // ---------------------------------------------------------------------
-  function frontierWords(tree, frontier) {
+  function countWords(text) {
+    return ((text || "").match(/\S+/g) || []).length;
+  }
+
+  function isSkim(node, prose) {
+    return !node.is_leaf && node.id !== state.tree.root && !prose.has(node.id) && hasSkimContent(node);
+  }
+
+  function hasSkimContent(node) {
+    return (node.key_points && node.key_points.length > 0) || !!node.hook;
+  }
+
+  function skimWords(node) {
+    const points = node.key_points && node.key_points.length ? node.key_points : [node.hook];
+    return countWords(nodeTitle(node)) + points.reduce((sum, p) => sum + countWords(p), 0);
+  }
+
+  function frontierWords(tree, frontier, prose) {
     let words = 0;
     for (const id of frontier) {
       const n = tree.nodes[id];
-      if (n) words += n.words;
+      if (!n) continue;
+      words += prose && isSkim(n, prose) ? skimWords(n) : n.words;
     }
     return words;
   }
@@ -262,7 +282,7 @@
   function updateReadout() {
     const tree = state.tree;
     if (!tree) return;
-    const words = frontierWords(tree, state.frontier);
+    const words = frontierWords(tree, state.frontier, state.prose);
     const minutes = Math.max(1, Math.round(words / WPM));
     const pct = Math.max(1, Math.round((words / Math.max(1, tree.source_words)) * 100));
     $dial.textContent = `~${minutes} min · ${pct}% of original`;
@@ -302,27 +322,38 @@
     if (!state.frontier || !state.frontier.length) {
       return window.Frontier.buildExpansionSequence(state.tree, anchorId);
     }
+    const P = window.Frontier.PROSE;
     const keep = new Set();
     for (const id of state.frontier) {
       let p = nodes[id] && nodes[id].parent;
       while (p && !keep.has(p)) {
         keep.add(p);
+        if (p !== state.tree.root) keep.add(P + p);
         p = nodes[p].parent;
       }
     }
+    for (const id of state.prose) keep.add(P + id);
     const seq = window.Frontier.buildExpansionSequence(state.tree, anchorId, keep);
     if (seq.length) state.z = keep.size / seq.length;
     return seq;
   }
 
+  // state.anchorNodeId is "the passage you're on" and drifts as zoom steps
+  // hand it to a child; state.sequenceAnchor is the passage the zoom order
+  // was actually built around. Rebuild whenever they differ, or a zoom
+  // started over one passage would keep following an older anchor's order
+  // and open something elsewhere on the page.
   function setAnchor(nodeId) {
     const prev = state.anchorNodeId;
     state.anchorNodeId = nodeId;
     state.pinMode = "point";
     const n = state.tree.nodes[nodeId];
     state.anchorOffset = n ? (n.source_span[0] + n.source_span[1]) / 2 : null;
-    if (prev !== nodeId) {
+    if (nodeId !== state.sequenceAnchor) {
       state.sequence = sequenceKeepingPage(nodeId);
+      state.sequenceAnchor = nodeId;
+    }
+    if (prev !== nodeId) {
       handleDwellChange(nodeId);
       updateNavCurrent();
       updateRail();
@@ -462,7 +493,7 @@
         `<div class="rail-card panel"><span class="rail-label">HOW IT WORKS</span>` +
           `<div class="step-chips">${secNode.steps.map((s) => `<span class="step-chip">${escapeHtml(s)}</span>`).join("")}</div></div>`
       );
-    } else if (secNode.key_points && secNode.key_points.length) {
+    } else if (secNode.key_points && secNode.key_points.length && !sectionPointsOnPage(secNode)) {
       parts.push(
         `<div class="rail-card panel"><span class="rail-label">KEY POINTS</span>` +
           `<ul class="key-points">${secNode.key_points.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul></div>`
@@ -481,6 +512,10 @@
     return parts.join("");
   }
 
+  function sectionPointsOnPage(secNode) {
+    return state.frontier.includes(secNode.id) && isSkim(secNode, state.prose);
+  }
+
   function railCardsForSection(tree, secId) {
     const secs = sectionsOf(tree);
     const idx = secs.indexOf(secId);
@@ -495,8 +530,11 @@
     const tree = state.tree;
     if (!tree || !$rail) return;
     const secId = state.anchorNodeId ? sectionAncestor(tree, state.anchorNodeId) : null;
-    if (secId === state.lastRailSection) return;
-    state.lastRailSection = secId;
+    // Re-render when the section changes, or when its bullets move between
+    // the page (skim) and the rail.
+    const key = secId ? `${secId}:${sectionPointsOnPage(tree.nodes[secId]) ? 1 : 0}` : null;
+    if (key === state.lastRailSection) return;
+    state.lastRailSection = key;
     const doUpdate = () => {
       $rail.innerHTML = secId ? railCardsForSection(tree, secId) : "";
     };
@@ -522,10 +560,26 @@
   // ---------------------------------------------------------------------
   // Rendering
   // ---------------------------------------------------------------------
-  function renderNodeBlockHTML(node) {
-    const html = window.marked ? window.marked.parse(node.text || "") : `<p>${escapeHtml(node.text || "")}</p>`;
+  // A summary is shown in one of two forms: skim (its title plus key-point
+  // bullets, how it first appears when its parent opens) or prose (its
+  // summary paragraph). Zooming in on it goes skim -> prose -> its parts, so
+  // you can get the idea from titles and bullets before reading paragraphs.
+  // A section's own block drops its title: the section header right above
+  // already shows it.
+  function renderNodeBlockHTML(node, opts) {
+    opts = opts || {};
+    const skim = isSkim(node, state.prose);
+    let html;
+    if (skim) {
+      const points = node.key_points && node.key_points.length ? node.key_points : [node.hook];
+      html = `<ul class="skim-points">${points.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul>`;
+    } else {
+      html = window.marked ? window.marked.parse(node.text || "") : `<p>${escapeHtml(node.text || "")}</p>`;
+    }
     const isLeaf = node.is_leaf;
-    const cls = ["node", isLeaf ? "leaf" : "summary", node.atomic ? "atomic" : ""].filter(Boolean).join(" ");
+    const cls = ["node", isLeaf ? "leaf" : "summary", skim ? "skim" : "", node.atomic ? "atomic" : "", opts.sectionSelf ? "section-self" : ""]
+      .filter(Boolean)
+      .join(" ");
     const prov = nodeProvenance(node);
     // Summaries link to their original text via the small ¶ label only (the
     // whole body used to be a hover target, which popped a bubble mid-zoom
@@ -535,8 +589,9 @@
       : isLeaf || !(node.cites && node.cites.length)
         ? `<span class="provenance">${escapeHtml(prov)}</span>`
         : `<button type="button" class="provenance source-link" title="Read the original text">${escapeHtml(prov)}<span class="source-link-more"> · original</span></button>`;
-    return `<div class="${cls}" data-node-id="${node.id}">
-      <div class="node-head"><h2 class="node-title">${escapeHtml(nodeTitle(node))}</h2>${provHTML}</div>
+    const titleHTML = opts.sectionSelf ? "" : `<h2 class="node-title">${escapeHtml(nodeTitle(node))}</h2>`;
+    return `<div class="${cls}" data-node-id="${node.id}" data-form="${skim ? "skim" : "prose"}">
+      <div class="node-head">${titleHTML}${provHTML}</div>
       <div class="node-body">${html}</div>
     </div>`;
   }
@@ -576,7 +631,9 @@
         <h1>${escapeHtml(title)}</h1>
         ${secNode.hook ? `<p class="section-hook">${escapeHtml(secNode.hook)}</p>` : ""}
       </div>
-      <div class="section-grid">${group.ids.map((id) => renderNodeBlockHTML(tree.nodes[id])).join("")}</div>
+      <div class="section-grid">${group.ids
+        .map((id) => renderNodeBlockHTML(tree.nodes[id], { sectionSelf: id === group.sectionId }))
+        .join("")}</div>
       <div class="section-rail-inline">${railHTML}</div>
     </div>`;
   }
@@ -656,6 +713,7 @@
 
     const oldIds = Array.from($content.querySelectorAll("[data-node-id]")).map((n) => n.dataset.nodeId);
     const oldSet = new Set(oldIds);
+    const oldForms = new Map(Array.from($content.querySelectorAll("[data-node-id]")).map((n) => [n.dataset.nodeId, n.dataset.form]));
     clearGhosts();
     const ghosts = animate && oldSet.size ? captureGhosts(new Set(state.frontier)) : [];
 
@@ -706,7 +764,13 @@
       const isStep = oldSet.size > 0 && state.frontier.some((id) => oldSet.has(id));
       for (const elNode of $content.querySelectorAll("[data-node-id]")) {
         const id = elNode.dataset.nodeId;
-        if (prevRects.has(id)) {
+        if (oldForms.has(id) && oldForms.get(id) !== elNode.dataset.form) {
+          elNode.classList.add("fade-enter", "wash");
+          elNode.addEventListener("animationend", (e) => {
+            if (e.target !== elNode) return;
+            elNode.classList.remove("fade-enter", "wash");
+          });
+        } else if (prevRects.has(id)) {
           const dy = prevRects.get(id).top - elNode.getBoundingClientRect().top;
           if (Math.abs(dy) > 0.5) {
             elNode.style.transition = "none";
@@ -965,7 +1029,7 @@
     el("mode-sections").setAttribute("aria-pressed", state.paletteMode === "sections");
   }
 
-  function renderPaletteOpenState() {
+  function renderPaletteOpenState(opts) {
     $palettePanel.hidden = !state.paletteOpen;
     $paletteBtn.setAttribute("aria-expanded", String(state.paletteOpen));
     $paletteBtn.setAttribute("aria-pressed", String(state.paletteOpen));
@@ -973,10 +1037,19 @@
       renderPalettePanel();
       const first = $palettePanel.querySelector("button");
       if (first) first.focus();
-    } else {
+    } else if (!(opts && opts.keepFocus)) {
       $paletteBtn.focus();
     }
   }
+
+  // Clicking anywhere outside the open palette closes it (focus stays
+  // wherever the click put it, rather than jumping back to the button).
+  document.addEventListener("pointerdown", (e) => {
+    if (!state.paletteOpen) return;
+    if ($palettePanel.contains(e.target) || $paletteBtn.contains(e.target)) return;
+    state.paletteOpen = false;
+    renderPaletteOpenState({ keepFocus: true });
+  });
 
   $paletteBtn.addEventListener("click", () => {
     state.paletteOpen = !state.paletteOpen;
@@ -1077,8 +1150,9 @@
     }
 
     state.z = clamped;
-    const { frontier } = window.Frontier.frontierAtZ(state.tree, state.sequence, state.z);
+    const { frontier, prose } = window.Frontier.frontierAtZ(state.tree, state.sequence, state.z);
     state.frontier = frontier;
+    state.prose = prose;
 
     const GESTURES = ["zkey", "ctrlwheel", "key", "jump"];
     const bigJump = Math.abs(clamped - zFrom) > 0.15 && !GESTURES.includes(inputType);
@@ -1153,7 +1227,7 @@
       anchorId = findCentreNodeId();
       anchorY = window.innerHeight / 2;
     }
-    if (anchorId && anchorId !== state.anchorNodeId) setAnchor(anchorId);
+    if (anchorId && (anchorId !== state.anchorNodeId || anchorId !== state.sequenceAnchor)) setAnchor(anchorId);
     const elAnchor = anchorId && $content.querySelector(`[data-node-id="${anchorId}"]`);
     if (!elAnchor) return anchorY;
     const rect = elAnchor.getBoundingClientRect();
@@ -1494,7 +1568,7 @@
     let bestDiff = Infinity;
     for (let k = 0; k <= sequence.length; k++) {
       const frontier = window.Frontier.frontierAtK(tree, sequence, k);
-      const words = frontierWords(tree, frontier);
+      const words = frontierWords(tree, frontier, window.Frontier.proseAtK(sequence, k));
       const minutes = words / WPM;
       const diff = Math.abs(minutes - 2);
       if (diff < bestDiff) {
@@ -1519,13 +1593,15 @@
     const saved = !opts.forceFresh ? loadPosition(tree.id) : null;
     const anchorId = (saved && saved.anchor_node_id && tree.nodes[saved.anchor_node_id]) ? saved.anchor_node_id : tree.root;
     state.sequence = window.Frontier.buildExpansionSequence(tree, anchorId);
+    state.sequenceAnchor = anchorId;
     state.anchorNodeId = anchorId;
     state.anchorOffset = saved ? saved.anchor_offset : null;
 
     const z = saved ? saved.z : initialZForTree(tree);
     state.z = 0;
-    const { frontier } = window.Frontier.frontierAtZ(tree, state.sequence, z);
+    const { frontier, prose } = window.Frontier.frontierAtZ(tree, state.sequence, z);
     state.frontier = frontier;
+    state.prose = prose;
     state.z = z;
     render({});
     updateReadout();

@@ -18,18 +18,32 @@
 //     nodes visible when the first k entries of the sequence are expanded.
 // -----------------------------------------------------------------------
 
+// Sequence token prefix: "~<id>" switches node <id> from its skim form
+// (title + key points) to its prose summary; a plain "<id>" expands it into
+// its children. Mirrors PROSE in riemann/abstraction/frontier.py.
+const PROSE = "~";
+
+function tokenNode(token) {
+  return token.charAt(0) === PROSE ? token.slice(1) : token;
+}
+
 /**
- * Build the expansion sequence for a tree, anchored at a given node.
+ * Build the zoom sequence for a tree, anchored at a given node.
  * Recompute this whenever the anchor changes (e.g. after a scroll).
+ *
+ * Every internal node except the root passes through three forms as the
+ * dial turns up: skim (title + key points, how it first appears when its
+ * parent opens), prose (its summary paragraph, token "~id"), then expanded
+ * (replaced by its children, token "id"). The root goes straight to
+ * expanded; leaves have no tokens.
  *
  * @param {object} tree - Tree JSON per the shared schema (nodes: {id: Node}).
  * @param {string} anchorNodeId - id of the node currently at viewport centre.
- * @param {Set<string>} [keepExpanded] - nodes expanded right now. They go
- *   first (parents-first, nearest-first among themselves), so re-anchoring
- *   keeps the page exactly as it is: frontierAtK(seq, keepExpanded.size) is
- *   the current frontier and the next step changes one node. Mirrors
+ * @param {Set<string>} [keepExpanded] - tokens applied right now (expanded
+ *   ids and "~id" prose tokens). They go first, so re-anchoring keeps the
+ *   page exactly as it is and the next step changes one passage. Mirrors
  *   keep_expanded in riemann/abstraction/frontier.py.
- * @returns {string[]} ordered list of internal node ids to expand, in order.
+ * @returns {string[]} ordered list of tokens.
  */
 function buildExpansionSequence(tree, anchorNodeId, keepExpanded) {
   const nodes = tree.nodes;
@@ -42,28 +56,30 @@ function buildExpansionSequence(tree, anchorNodeId, keepExpanded) {
   };
 
   const sequence = [];
-  // Candidates: internal nodes whose parent has already been expanded
-  // (or the root, which is always an initial candidate if it's internal).
   const candidates = [];
 
   const root = nodes[tree.root];
   if (root && !root.is_leaf) candidates.push(tree.root);
 
   while (candidates.length > 0) {
-    // Pick the best candidate: nearest to anchor, then higher importance,
-    // then shallower depth. Linear scan is fine at tree sizes seen here.
+    // Pick the best candidate: already-applied first (keepExpanded), then
+    // nearest to anchor, higher importance, shallower depth, node id.
     let bestIdx = 0;
     for (let i = 1; i < candidates.length; i++) {
-      const a = nodes[candidates[i]];
-      const b = nodes[candidates[bestIdx]];
+      const ta = candidates[i];
+      const tb = candidates[bestIdx];
       if (keepExpanded) {
-        const ka = keepExpanded.has(candidates[i]) ? 0 : 1;
-        const kb = keepExpanded.has(candidates[bestIdx]) ? 0 : 1;
+        const ka = keepExpanded.has(ta) ? 0 : 1;
+        const kb = keepExpanded.has(tb) ? 0 : 1;
         if (ka !== kb) {
           if (ka < kb) bestIdx = i;
           continue;
         }
       }
+      const ida = tokenNode(ta);
+      const idb = tokenNode(tb);
+      const a = nodes[ida];
+      const b = nodes[idb];
       const da = distanceOf(a);
       const db = distanceOf(b);
       if (da !== db) {
@@ -78,17 +94,20 @@ function buildExpansionSequence(tree, anchorNodeId, keepExpanded) {
         if (a.depth < b.depth) bestIdx = i;
         continue;
       }
-      // Final tie-break by id, matching riemann/abstraction/frontier.py.
-      if (candidates[i] < candidates[bestIdx]) bestIdx = i;
+      // Final tie-break by node id, matching riemann/abstraction/frontier.py.
+      if (ida < idb) bestIdx = i;
     }
 
-    const id = candidates.splice(bestIdx, 1)[0];
-    sequence.push(id);
+    const token = candidates.splice(bestIdx, 1)[0];
+    sequence.push(token);
 
-    const node = nodes[id];
-    for (const childId of node.children) {
-      const child = nodes[childId];
-      if (child && !child.is_leaf) candidates.push(childId);
+    if (token.charAt(0) === PROSE) {
+      candidates.push(tokenNode(token));
+    } else {
+      for (const childId of nodes[token].children) {
+        const child = nodes[childId];
+        if (child && !child.is_leaf) candidates.push(PROSE + childId);
+      }
     }
   }
 
@@ -117,7 +136,7 @@ function zToK(z, totalExpansions) {
  *   ancestor of another.
  */
 function frontierAtK(tree, sequence, k) {
-  const expanded = new Set(sequence.slice(0, Math.max(0, k)));
+  const expanded = new Set(sequence.slice(0, Math.max(0, k)).filter((t) => t.charAt(0) !== PROSE));
   const nodes = tree.nodes;
   const result = [];
 
@@ -139,7 +158,20 @@ function frontierAtK(tree, sequence, k) {
  */
 function frontierAtZ(tree, sequence, z) {
   const k = zToK(z, sequence.length);
-  return { frontier: frontierAtK(tree, sequence, k), k };
+  return { frontier: frontierAtK(tree, sequence, k), prose: proseAtK(sequence, k), k };
+}
+
+/**
+ * Node ids shown as their prose summary after the first k steps; every
+ * other internal node on the page is shown in skim form (title + key points).
+ * @param {string[]} sequence
+ * @param {number} k
+ * @returns {Set<string>}
+ */
+function proseAtK(sequence, k) {
+  const out = new Set();
+  for (const t of sequence.slice(0, Math.max(0, k))) if (t.charAt(0) === PROSE) out.add(tokenNode(t));
+  return out;
 }
 
 /**
@@ -181,5 +213,7 @@ window.Frontier = {
   zToK,
   frontierAtK,
   frontierAtZ,
+  proseAtK,
   findFrontierNodeAtOffset,
+  PROSE,
 };

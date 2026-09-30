@@ -53,11 +53,16 @@ def test_sequence_is_topologically_valid():
     seq = expansion_sequence(tree)
     # a node can only be expanded once its parent is in the frontier,
     # i.e. once the parent has itself already been expanded (or is root).
-    expanded_so_far: set[str] = set()
-    for node_id in seq:
-        node = tree.nodes[node_id]
-        assert node_id == tree.root or node.parent in expanded_so_far
-        expanded_so_far.add(node_id)
+    # Tokens: "~x" (show x's summary as prose) needs x's parent expanded;
+    # "x" (expand) needs "~x" first, except for the root.
+    applied: set[str] = set()
+    for token in seq:
+        if token.startswith("~"):
+            node = tree.nodes[token[1:]]
+            assert node.parent in applied
+        else:
+            assert token == tree.root or "~" + token in applied
+        applied.add(token)
 
 
 def test_frontier_is_monotonic():
@@ -89,7 +94,8 @@ def test_anchor_prioritises_nearby_nodes():
     # when both are candidates in the frontier simultaneously.
     seq = expansion_sequence(tree, anchor_id="a1")
     assert seq[0] == "root"
-    assert seq[1] == "a"  # nearer to a1 than b is
+    assert seq[1] == "~a"  # nearer to a1 than b is: its bullets become prose first
+    assert seq[2] == "a"
 
 
 def test_find_anchor_replacement_contains_old_offset():
@@ -98,3 +104,34 @@ def test_find_anchor_replacement_contains_old_offset():
     replacement = find_anchor_replacement(tree, frontier, offset=15)
     assert tree.nodes[replacement].source_span[0] <= 15 < tree.nodes[replacement].source_span[1]
     assert replacement == "a2"
+
+
+def test_each_step_changes_one_passage():
+    """A step either turns one node's bullets into its paragraph (frontier
+    unchanged) or opens one paragraph into its parts."""
+    from riemann.abstraction.frontier import prose_at
+
+    tree = _make_tree()
+    seq = expansion_sequence(tree)
+    for k in range(1, len(seq) + 1):
+        f0, f1 = frontier_at(tree, seq, k - 1), frontier_at(tree, seq, k)
+        p0, p1 = prose_at(seq, k - 1), prose_at(seq, k)
+        token = seq[k - 1]
+        if token.startswith("~"):
+            assert f0 == f1 and p1 - p0 == {token[1:]}
+        else:
+            assert set(f0) - set(f1) == {token}
+            assert set(f1) - set(f0) == set(tree.nodes[token].children)
+            # a node opens only after it has been read as prose (root excepted)
+            assert token == tree.root or token in p0
+
+
+def test_new_internal_children_start_as_skim():
+    from riemann.abstraction.frontier import prose_at
+
+    tree = _make_tree()
+    seq = expansion_sequence(tree)
+    k = seq.index(tree.root) + 1
+    internal_children = [c for c in tree.nodes[tree.root].children if not tree.nodes[c].is_leaf]
+    assert internal_children
+    assert not (set(internal_children) & prose_at(seq, k))

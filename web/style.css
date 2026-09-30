@@ -1055,6 +1055,40 @@ kbd {
   white-space: nowrap;
 }
 
+/* Skim form: a summary's key points as bullets (see renderNodeBlockHTML). */
+.skim-points {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skim-points li {
+  position: relative;
+  padding-left: 22px;
+  font-size: 16.5px;
+  line-height: 1.5;
+  color: var(--body);
+}
+
+.skim-points li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.55em;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--sec-n, var(--hl));
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--sec-n, var(--hl)), var(--text) 45%);
+}
+
+.node.section-self .node-head:not(:has(*)) {
+  display: none;
+}
+
 /* Summaries: the ¶ label is the link to the original text. */
 button.source-link {
   border: none;

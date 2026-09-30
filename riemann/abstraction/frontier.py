@@ -86,53 +86,86 @@ def _priority_key(tree: Tree, node_id: str, anchor_id: str):
     return (distance, -node.importance, node.depth, node_id)
 
 
+PROSE = "~"
+"""Sequence token prefix: ``"~<id>"`` switches node <id> from its skim form
+(title + key points) to its prose summary. A plain ``"<id>"`` expands it
+into its children."""
+
+
+def _token_node(token: str) -> str:
+    return token[1:] if token.startswith(PROSE) else token
+
+
 def expansion_sequence(
     tree: Tree,
     anchor_id: str | None = None,
     start_frontier: set[str] | None = None,
     keep_expanded: set[str] | None = None,
 ) -> list[str]:
-    """Compute the full ordered expansion sequence from a starting frontier.
+    """Compute the full ordered zoom sequence from a starting frontier.
 
-    anchor_id: node to prioritise expansions near. Defaults to the root
-    (i.e. no particular anchor -- ties broken purely by importance/depth).
-    start_frontier: the frontier to start expanding from. Defaults to
-    ``{tree.root}``, i.e. the sequence for a fresh dial at z=0.
-    keep_expanded: nodes that are expanded right now. They go first (still
-    parents-first, nearest-first among themselves), so re-anchoring keeps
-    the page exactly as it is: frontier_at(seq, len(keep_expanded)) is the
-    current frontier, and the next step in either direction changes one
-    node. Must be closed under ancestors (any valid frontier's expanded set
-    is).
+    Every internal node except the root passes through three forms as the
+    dial turns up: **skim** (its title and key points, how it first appears
+    when its parent opens), then **prose** (its summary paragraph, token
+    ``"~id"``), then **expanded** (replaced by its children, token ``"id"``).
+    So each step either turns one passage's bullets into its paragraph or
+    opens one paragraph into its parts. The root has no skim form (at k=0 it
+    is the hero line) and goes straight to expanded; leaves are verbatim
+    source and have no tokens.
+
+    anchor_id: node to prioritise steps near. Defaults to the root.
+    start_frontier: the frontier to start from. Defaults to ``{tree.root}``.
+    keep_expanded: tokens already applied right now (expanded ids and
+    ``"~id"`` prose tokens). They go first (still topologically valid,
+    nearest-first among themselves), so re-anchoring keeps the page exactly
+    as it is: frontier_at/prose_at(seq, len(keep_expanded)) is the current
+    page, and the next step in either direction changes one passage. Must
+    be closed under prerequisites (any real page's applied set is).
     """
     anchor = anchor_id or tree.root
-    frontier = set(start_frontier) if start_frontier is not None else {tree.root}
     keep = keep_expanded or set()
+    candidates: set[str] = set()
+    for nid in (set(start_frontier) if start_frontier is not None else {tree.root}):
+        node = tree.nodes[nid]
+        if node.is_leaf:
+            continue
+        candidates.add(nid if nid == tree.root else PROSE + nid)
     sequence: list[str] = []
 
-    while True:
-        candidates = [nid for nid in frontier if not tree.nodes[nid].is_leaf]
-        if not candidates:
-            break
+    while candidates:
         best = min(
             candidates,
-            key=lambda nid: (0 if nid in keep else 1,) + _priority_key(tree, nid, anchor),
+            key=lambda t: (0 if t in keep else 1,) + _priority_key(tree, _token_node(t), anchor),
         )
+        candidates.discard(best)
         sequence.append(best)
-        frontier.discard(best)
-        frontier.update(tree.nodes[best].children)
+        if best.startswith(PROSE):
+            candidates.add(_token_node(best))
+        else:
+            for child_id in tree.nodes[best].children:
+                if not tree.nodes[child_id].is_leaf:
+                    candidates.add(PROSE + child_id)
 
     return sequence
 
 
 def frontier_at(tree: Tree, sequence: list[str], k: int) -> list[str]:
-    """Replay the first k expansions of `sequence` onto {root}, returning
-    the resulting frontier in document order (by source_span start)."""
+    """Replay the first k steps of `sequence` onto {root}, returning the
+    resulting frontier in document order (by source_span start). Prose
+    tokens don't change the frontier, only how a node is shown."""
     frontier = {tree.root}
-    for node_id in sequence[:k]:
-        frontier.discard(node_id)
-        frontier.update(tree.nodes[node_id].children)
+    for token in sequence[:k]:
+        if token.startswith(PROSE):
+            continue
+        frontier.discard(token)
+        frontier.update(tree.nodes[token].children)
     return sorted(frontier, key=lambda nid: tree.nodes[nid].source_span[0])
+
+
+def prose_at(sequence: list[str], k: int) -> set[str]:
+    """Node ids shown as their prose summary after the first k steps (every
+    other internal node on the page is shown in skim form)."""
+    return {_token_node(t) for t in sequence[:k] if t.startswith(PROSE)}
 
 
 def k_for_z(z: float, total_expansions: int) -> int:

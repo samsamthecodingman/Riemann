@@ -126,6 +126,16 @@ A CSS grid: `300px | minmax(0,1fr) | 380px` columns and a `72px | 1fr` row. The 
 - **Across zoom:** highlights live on nodes. A node that isn't in the frontier shows nothing, but its highlights come back when you zoom back in. Rendering highlights must never change the node's block height (inline marks only).
 - **Event log:** `highlight {action: add|recolour|remove, node_id, colour}`.
 
+### Skim form (added 2026-09-30)
+- Every summary except the root has two forms:
+  - **skim:** its title plus its `key_points` as bullets, or the `hook` when it has no key points
+  - **prose:** its summary paragraph
+- Zooming in on a summary goes skim → prose → its parts, and parts that are summaries start as skim.
+- The zoom sequence therefore has two kinds of token: `"~id"` (show id as prose) and `"id"` (expand). This is in both `frontier.py` and `frontier.js`, and the parity test covers it.
+- Word counts and the readout count a skim block as its title plus bullets.
+- A section's own block drops its title, because the section header already shows it. The rail hides KEY POINTS while those bullets are on the page.
+- Why: Sam found the jump from one paragraph to full section paragraphs too big and wanted to "get the idea first reading titles".
+
 ### Unchanged behaviour to re-verify
 - Pointer-anchored zoom with 0 px drift in the 2-column layout.
 - No layout shift from the sticky header, nav or rail when the current section changes: rail height changes must not move the middle column.

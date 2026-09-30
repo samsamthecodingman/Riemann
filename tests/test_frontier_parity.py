@@ -49,22 +49,13 @@ process.stdout.write(JSON.stringify(out));
 """
 
 
-def _expanded_set(tree: Tree, frontier: list[str]) -> set[str]:
-    out: set[str] = set()
-    for nid in frontier:
-        cur = tree.nodes[nid].parent
-        while cur is not None:
-            out.add(cur)
-            cur = tree.nodes[cur].parent
-    return out
-
-
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 def test_reanchoring_keeps_the_current_page_and_matches_js():
-    """Re-anchoring mid-zoom must not reshuffle the page: with the current
-    expanded set kept first, frontier(k) is unchanged and k+1 / k-1 differ
-    from it by exactly one expansion. And JS must agree with Python."""
-    from riemann.abstraction.frontier import frontier_at
+    """Re-anchoring mid-zoom must not reshuffle the page: with the steps
+    applied so far kept first, the page (frontier and which passages are
+    prose) is unchanged, and one step either way changes one passage. And
+    JS must agree with Python."""
+    from riemann.abstraction.frontier import frontier_at, prose_at
 
     tree = Tree.model_validate(json.loads(FIXTURE.read_text()))
     ids = sorted(tree.nodes)
@@ -72,18 +63,20 @@ def test_reanchoring_keeps_the_current_page_and_matches_js():
     for old_anchor in ids[::3]:
         old_seq = expansion_sequence(tree, old_anchor)
         for k in range(0, len(old_seq) + 1, 3):
-            current = frontier_at(tree, old_seq, k)
-            keep = _expanded_set(tree, current)
+            keep = set(old_seq[:k])
+            page = (frontier_at(tree, old_seq, k), prose_at(old_seq, k))
             for new_anchor in ids[1::4]:
                 seq = expansion_sequence(tree, new_anchor, keep_expanded=keep)
-                assert frontier_at(tree, seq, len(keep)) == current
-                for k2 in (len(keep) - 1, len(keep) + 1):
+                assert (frontier_at(tree, seq, k), prose_at(seq, k)) == page
+                for k2 in (k - 1, k + 1):
                     if 0 <= k2 <= len(seq):
-                        changed = set(frontier_at(tree, seq, k2)) ^ set(current)
-                        # exactly one node swapped for its children (or back)
-                        assert any(
-                            changed == {n} | set(tree.nodes[n].children) for n in changed
-                        ), (old_anchor, k, new_anchor, k2)
+                        f2, p2 = frontier_at(tree, seq, k2), prose_at(seq, k2)
+                        changed = set(f2) ^ set(page[0])
+                        if changed:
+                            assert p2 == page[1]
+                            assert any(changed == {n} | set(tree.nodes[n].children) for n in changed)
+                        else:
+                            assert len(p2 ^ page[1]) == 1
                 cases.append((new_anchor, sorted(keep), seq))
 
     js = json.loads(subprocess.run(
