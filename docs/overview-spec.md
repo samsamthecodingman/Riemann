@@ -73,5 +73,5 @@ into the current cache namespace.
 
 ## Cache namespaces
 
-`SCHEMA_VERSION = "schema4"`. `/api/recent`, `/api/tree/{id}` and open-by-id fall back, read-only, to older
+`SCHEMA_VERSION = "schema5"`. `/api/recent`, `/api/tree/{id}` and open-by-id fall back, read-only, to older
 build-version dirs (and the flat `trees/` dir), so documents built earlier still open. Nothing is written to them.

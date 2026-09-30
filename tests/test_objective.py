@@ -25,8 +25,9 @@ def test_objective_in_tree_id():
     assert cache.tree_id_for("text", None, None) == cache.tree_id_for("text")
 
 
-def test_schema_version_not_bumped():
-    assert cache.SCHEMA_VERSION == "schema4"
+def test_schema_version():
+    assert cache.SCHEMA_VERSION == "schema5"
+    assert cache.build_version().endswith("-schema5")
 
 
 def test_focus_block_in_prompt_and_faithfulness_kept():

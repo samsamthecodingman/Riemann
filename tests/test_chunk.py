@@ -92,3 +92,56 @@ def test_a_long_markdown_table_is_one_atomic_leaf_never_cut_mid_row():
 def test_pipes_inside_prose_do_not_make_a_table():
     text = f"# A\n\n{_words(60)} a | b | c inline pipes are fine {_words(30, 'x')}\n"
     assert not any(l.atomic for l in chunk(text))
+
+
+# --- sentence-aware splitting (schema6) ---------------------------------------------------
+
+def _sentences(n: int, words_each: int = 11) -> str:
+    return " ".join(f"S{i}w0 {_words(words_each - 2, f's{i}w')} ends." for i in range(n))
+
+
+def test_long_paragraph_splits_at_the_latest_sentence_end_under_the_cap():
+    # 15 sentences of 11 words = 165 words; the first cut must fall on a full stop,
+    # and be as late as fits (10 sentences = 110 words, not an early stub).
+    leaves = chunk("# A\n\n" + _sentences(15) + "\n")
+    assert len(leaves) == 2
+    assert leaves[0].text.endswith("ends.") and leaves[1].text.endswith("ends.")
+    assert leaves[0].words == 110
+
+
+def test_a_sentence_boundary_is_found_even_when_it_is_early_in_the_window():
+    # Old rule only looked in the last 40% of the window and cut mid-sentence
+    # when the last full stop was earlier than that.
+    first = _words(40) + " done."  # 41 words
+    second = "Tail " + _words(150, "tail")  # one long run-on sentence, no full stop
+    leaves = chunk("# A\n\n" + first + " " + second + ".\n")
+    assert leaves[0].text.endswith("done.")
+
+
+def test_clause_boundary_is_the_fallback_when_there_is_no_sentence_end():
+    clauses = ", ".join(_words(9, f"c{i}x") for i in range(20))  # 180 words, commas only
+    leaves = chunk("# A\n\n" + clauses + ".\n")
+    assert all(l.words <= MAX_LEAF_WORDS for l in leaves)
+    assert leaves[0].text.endswith(",") or leaves[0].text.endswith(";")
+    # the cut is at a clause, not inside one: the next leaf starts a clause
+    assert leaves[1].text.startswith("c")
+
+
+def test_abbreviations_are_not_sentence_ends():
+    text = "# A\n\n" + " ".join(["The result (Fig. 3, e.g. the plot) shows a strong effect, see Smith et al. for detail."] * 10) + "\n"
+    for leaf in chunk(text):
+        assert not leaf.text.rstrip().endswith(("Fig.", "e.g.", "al."))
+
+
+def test_a_run_on_with_no_punctuation_still_obeys_the_cap():
+    leaves = chunk("# A\n\n" + _words(400) + "\n")
+    assert all(l.words <= MAX_LEAF_WORDS for l in leaves)
+
+
+def test_leaves_never_pack_across_a_sub_heading():
+    text = f"# Doc\n\n## Part\n\n{_words(30)}\n\n### Sub\n\n{_words(30, 'sub')}\n\n## Next\n\n{_words(30, 'nx')}\n"
+    leaves = chunk(text)
+    for leaf in leaves:
+        prefixes = {w[:2] for w in leaf.text.split()}
+        assert len(prefixes) == 1, leaf.text  # only one section's words per leaf
+    assert {l.heading_path for l in leaves} == {("Doc", "Part"), ("Doc", "Part", "Sub"), ("Doc", "Next")}

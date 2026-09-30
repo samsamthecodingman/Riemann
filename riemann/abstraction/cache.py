@@ -44,7 +44,7 @@ def legacy_dirs() -> list[Path]:
     return subs + [root]
 
 
-SCHEMA_VERSION = "schema4"  # bump whenever prompts, chunking/normalisation or node fields change (schema2: v2 macaron fields; schema3: sentence-case titles; schema4: normalised text, no single-child chains, overview card)
+SCHEMA_VERSION = "schema5"  # bump whenever prompts, chunking/normalisation or node fields change (schema2: v2 macaron fields; schema3: sentence-case titles; schema4: normalised text, no single-child chains, overview card; schema5: sentence-aware splitting of long paragraphs)
 
 
 def build_version() -> str:

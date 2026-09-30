@@ -1,6 +1,7 @@
 """Chunk: markdown -> leaves.
 
-Splits on headings, then packs paragraphs into leaves of <= ~120 words.
+Splits on headings (never packing across any heading level), then packs paragraphs into leaves of <= ~120 words;
+an over-long paragraph is cut at the latest sentence end, else the latest clause end, else by word count.
 Code fences, numbered procedures and $$...$$ display-math blocks become
 their own atomic leaves (never summarised, shown verbatim). A tiny
 document (<= ~60 words) becomes a single leaf.
@@ -195,34 +196,64 @@ def _expand_math_and_procedures(blocks: list[_Block]) -> list[_Block]:
     return out
 
 
+_SENT_END_RE = re.compile(r"[.!?][\"')\]”’]*$")
+_CLAUSE_END_RE = re.compile(r"[,;:][\"')\]”’]*$")
+_NOT_SENTENCE_ENDS = {
+    "e.g.", "i.e.", "etc.", "vs.", "cf.", "fig.", "figs.", "eq.", "eqs.", "no.", "nos.", "dr.", "mr.", "mrs.", "ms.",
+    "prof.", "approx.", "al.", "ca.", "sec.", "vol.", "pp.", "p.", "st.", "inc.", "ltd.", "jr.", "sr.", "u.s.", "u.k.",
+}
+def _is_sentence_end(word: str, nxt: str | None) -> bool:
+    """Does this word end a sentence, judging by the word after it? An
+    abbreviation ("Fig.", "e.g.", "et al."), an initial ("J.") or a bare
+    number ("3.") does not."""
+    if not _SENT_END_RE.search(word):
+        return False
+    core = word.rstrip("\"')]”’").lower()
+    if core in _NOT_SENTENCE_ENDS or re.fullmatch(r"\d{1,3}[.]", core) or re.fullmatch(r"[a-z][.]", core):
+        return False
+    return nxt is None or not nxt[:1].islower()  # a capital, digit, quote or list marker starts the next sentence
+
+
+def _is_clause_end(word: str, nxt: str | None) -> bool:
+    return bool(_CLAUSE_END_RE.search(word)) and nxt is not None and nxt[:1].islower()
+
+
+def _cut_point(words: list[str], i: int, limit: int) -> int:
+    """Where the piece that starts at word i (and may hold `limit` words) ends:
+    the latest sentence end in the window, else the latest clause end, else a
+    hard cut at the limit (text with neither). An early sentence end beats a late
+    clause end: the packer joins a short piece to its neighbour again, whereas a
+    cut inside a sentence cannot be undone."""
+    j = min(i + limit, len(words))
+    if j >= len(words):
+        return j
+    for test in (_is_sentence_end, _is_clause_end):
+        for k in range(j, i, -1):
+            if test(words[k - 1], words[k] if k < len(words) else None):
+                return k
+    return j
+
+
 def _split_long_paragraph(block: _Block) -> list[_Block]:
-    """Split a paragraph over MAX_LEAF_WORDS into chunks of <= MAX_LEAF_WORDS
-    words, preferring to break at a sentence end near the cap when there is
-    one, else a hard word-count cut (robust even with no punctuation at all,
-    e.g. a single very long run-on line)."""
+    """Split a paragraph over MAX_LEAF_WORDS into pieces of <= MAX_LEAF_WORDS
+    words, each ending at the latest sentence boundary that fits, else the
+    latest clause boundary, else a hard word-count cut (robust even with no
+    punctuation at all, e.g. a single very long run-on line)."""
     if word_count(block.text) <= MAX_LEAF_WORDS:
         return [block]
 
     text = block.text
     base = block.span[0]
-    words = list(re.finditer(r"\S+", text))
+    matches = list(re.finditer(r"\S+", text))
+    words = [m.group() for m in matches]
     n = len(words)
     out: list[_Block] = []
     i = 0
     while i < n:
-        j = min(i + MAX_LEAF_WORDS, n)
-        if j < n:
-            search_start = max(i + 1, i + int(MAX_LEAF_WORDS * 0.6))
-            best = None
-            for k in range(search_start, j + 1):
-                if words[k - 1].group().endswith((".", "!", "?", '."', '!"', '?"', ".'", "!'", "?'")):
-                    best = k
-            if best:
-                j = best
-        start_char = words[i].start()
-        end_char = words[j - 1].end()
-        chunk_text = text[start_char:end_char]
-        out.append(_Block(text=chunk_text, span=(base + start_char, base + end_char), kind="paragraph"))
+        j = _cut_point(words, i, MAX_LEAF_WORDS)
+        start_char = matches[i].start()
+        end_char = matches[j - 1].end()
+        out.append(_Block(text=text[start_char:end_char], span=(base + start_char, base + end_char), kind="paragraph"))
         i = j
     return out or [block]
 
