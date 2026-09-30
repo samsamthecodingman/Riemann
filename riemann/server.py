@@ -19,6 +19,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from riemann import events
 from riemann.abstraction import build, cache, ingest
+from riemann.abstraction.chunk import word_count
 from riemann.abstraction.summarise import BLOCKED_MODELS, default_model, get_summariser, list_models
 
 app = FastAPI(title="Riemann")
@@ -130,7 +131,7 @@ async def api_abstract(request: Request) -> dict:
 
     if not text.strip():
         raise HTTPException(400, "no content to abstract")
-    n_words = len(text.split())
+    n_words = word_count(text)
     if n_words > MAX_SOURCE_WORDS:
         raise HTTPException(
             400,

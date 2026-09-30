@@ -31,8 +31,48 @@ class Leaf(BaseModel):
     heading_path: tuple[str, ...] = ()
 
 
+# Han, Kana and the CJK extension blocks: written without spaces, so each character counts as
+# about one word (web/frontier.js `countWords` uses the same ranges; keep them in step).
+# Hangul is spaced like English, so its space-separated words are counted as they are.
+_CJK_CHARS = (
+    "\u3040-\u309f\u30a0-\u30ff\u31f0-\u31ff"  # Hiragana, Katakana, Katakana extensions
+    "\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"  # Han: extension A, unified, compatibility
+    "\uff66-\uff9f"  # half-width Katakana
+    "\U00020000-\U0002fa1f"  # Han: extensions B..F, supplement
+)
+_CJK_CHAR_RE = re.compile(f"[{_CJK_CHARS}]")
+_CJK_PUNCT = "\u3000-\u3004\u3008-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65"
+_CJK_PUNCT_ONLY_RE = re.compile(f"[{_CJK_PUNCT}]+")
+# A counting unit: one CJK character, or a run of anything else that is not whitespace.
+_UNIT_RE = re.compile(f"[{_CJK_CHARS}]|(?:(?![{_CJK_CHARS}])\\S)+")
+
+
 def word_count(text: str) -> int:
-    return len(text.split())
+    """Whitespace-separated words, plus one per Han/Kana character (a run of
+    CJK punctuation on its own is not a word). Text without CJK is just
+    `len(text.split())`."""
+    if not _CJK_CHAR_RE.search(text):
+        return len(text.split())
+    n = 0
+    for m in _UNIT_RE.finditer(text):
+        if not _CJK_PUNCT_ONLY_RE.fullmatch(m.group()):
+            n += 1
+    return n
+
+
+def head_words(text: str, n: int) -> str:
+    """The first n words of text (as word_count counts them), with their original spacing."""
+    if not _CJK_CHAR_RE.search(text):
+        return " ".join(text.split()[:n])
+    count = 0
+    end = 0
+    for m in _UNIT_RE.finditer(text):
+        if not _CJK_PUNCT_ONLY_RE.fullmatch(m.group()):
+            if count == n:
+                break
+            count += 1
+        end = m.end()
+    return text[:end].strip()
 
 
 class _Block(BaseModel):
@@ -202,10 +242,26 @@ _NOT_SENTENCE_ENDS = {
     "e.g.", "i.e.", "etc.", "vs.", "cf.", "fig.", "figs.", "eq.", "eqs.", "no.", "nos.", "dr.", "mr.", "mrs.", "ms.",
     "prof.", "approx.", "al.", "ca.", "sec.", "vol.", "pp.", "p.", "st.", "inc.", "ltd.", "jr.", "sr.", "u.s.", "u.k.",
 }
-def _is_sentence_end(word: str, nxt: str | None) -> bool:
-    """Does this word end a sentence, judging by the word after it? An
-    abbreviation ("Fig.", "e.g.", "et al."), an initial ("J.") or a bare
-    number ("3.") does not."""
+_CJK_SENT_PUNCT = set("。！？‼⁇⁈⁉．｡")
+_CJK_CLAUSE_PUNCT = set("、，；：､")
+_CJK_CLOSERS = set("」』）】〕〉》］｝”’")
+
+
+def _trim_closers(word: str) -> str:
+    return word.rstrip("".join(_CJK_CLOSERS))
+
+
+def _is_sentence_end(units: list[str], k: int) -> bool:
+    """May a piece end after units[k-1] (k units used)? An English word ending
+    in . ! ? counts unless it is an abbreviation ("Fig.", "e.g.", "et al."), an
+    initial ("J.") or a bare number ("3."), or the next word starts lower case;
+    CJK 。！？ count, and keep a closing quote or bracket that follows them."""
+    word = units[k - 1]
+    nxt = units[k] if k < len(units) else None
+    if nxt is not None and nxt[:1] in _CJK_CLOSERS:
+        return False  # the closer belongs to this sentence
+    if (tail := _trim_closers(word)) and tail[-1] in _CJK_SENT_PUNCT:
+        return True
     if not _SENT_END_RE.search(word):
         return False
     core = word.rstrip("\"')]”’").lower()
@@ -214,22 +270,33 @@ def _is_sentence_end(word: str, nxt: str | None) -> bool:
     return nxt is None or not nxt[:1].islower()  # a capital, digit, quote or list marker starts the next sentence
 
 
-def _is_clause_end(word: str, nxt: str | None) -> bool:
+def _is_clause_end(units: list[str], k: int) -> bool:
+    word = units[k - 1]
+    nxt = units[k] if k < len(units) else None
+    if nxt is not None and nxt[:1] in _CJK_CLOSERS:
+        return False
+    if (tail := _trim_closers(word)) and tail[-1] in _CJK_CLAUSE_PUNCT:
+        return True
     return bool(_CLAUSE_END_RE.search(word)) and nxt is not None and nxt[:1].islower()
 
 
-def _cut_point(words: list[str], i: int, limit: int) -> int:
-    """Where the piece that starts at word i (and may hold `limit` words) ends:
+def _cut_point(units: list[str], weights: list[int], i: int, limit: int) -> int:
+    """Where the piece that starts at unit i (and may hold `limit` words) ends:
     the latest sentence end in the window, else the latest clause end, else a
     hard cut at the limit (text with neither). An early sentence end beats a late
     clause end: the packer joins a short piece to its neighbour again, whereas a
     cut inside a sentence cannot be undone."""
-    j = min(i + limit, len(words))
-    if j >= len(words):
-        return j
+    n = len(units)
+    j, used = i, 0
+    while j < n and used + weights[j] <= limit:
+        used += weights[j]
+        j += 1
+    j = max(j, i + 1)
+    if j >= n:
+        return n
     for test in (_is_sentence_end, _is_clause_end):
         for k in range(j, i, -1):
-            if test(words[k - 1], words[k] if k < len(words) else None):
+            if test(units, k):
                 return k
     return j
 
@@ -238,19 +305,21 @@ def _split_long_paragraph(block: _Block) -> list[_Block]:
     """Split a paragraph over MAX_LEAF_WORDS into pieces of <= MAX_LEAF_WORDS
     words, each ending at the latest sentence boundary that fits, else the
     latest clause boundary, else a hard word-count cut (robust even with no
-    punctuation at all, e.g. a single very long run-on line)."""
+    punctuation at all, e.g. a single very long run-on line). Works on words
+    and, for CJK text, on single characters."""
     if word_count(block.text) <= MAX_LEAF_WORDS:
         return [block]
 
     text = block.text
     base = block.span[0]
-    matches = list(re.finditer(r"\S+", text))
-    words = [m.group() for m in matches]
-    n = len(words)
+    matches = list(_UNIT_RE.finditer(text))
+    units = [m.group() for m in matches]
+    weights = [0 if _CJK_PUNCT_ONLY_RE.fullmatch(u) else 1 for u in units]
+    n = len(units)
     out: list[_Block] = []
     i = 0
     while i < n:
-        j = _cut_point(words, i, MAX_LEAF_WORDS)
+        j = _cut_point(units, weights, i, MAX_LEAF_WORDS)
         start_char = matches[i].start()
         end_char = matches[j - 1].end()
         out.append(_Block(text=text[start_char:end_char], span=(base + start_char, base + end_char), kind="paragraph"))

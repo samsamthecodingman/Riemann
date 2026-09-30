@@ -15,7 +15,7 @@ import hashlib
 import logging
 import re
 
-from riemann.abstraction.chunk import TINY_DOC_WORDS, chunk, word_count
+from riemann.abstraction.chunk import TINY_DOC_WORDS, chunk, head_words, word_count
 from riemann.abstraction.model import Essential, KeyFact, Node, Overview, Tree
 from riemann.abstraction.summarise import ModelError, Summariser, parse_json_robustly
 
@@ -504,8 +504,7 @@ def _validate_key_fact(raw: object, nodes: dict[str, Node], leaf_ctx_ids: list[s
 
 
 def _provisional_prompt(source_text: str, title: str) -> str:
-    words = source_text.split()
-    truncated = " ".join(words[:3000])
+    truncated = head_words(source_text, 3000)
     headings = [ln.strip() for ln in source_text.splitlines() if ln.strip().startswith("#")]
     parts = [f"Title: {title}", "", truncated]
     if headings:

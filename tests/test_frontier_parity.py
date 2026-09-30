@@ -111,3 +111,71 @@ def test_js_matches_python_on_merged_steps(tmp_path, chain):
     ).stdout)
     for anchor in tree.nodes:
         assert js[anchor] == expansion_sequence(tree, anchor), f"order differs for anchor {anchor}"
+
+
+WORDS_SCRIPT = """
+const fs = require('fs');
+global.window = {};
+eval(fs.readFileSync(process.argv[1], 'utf8'));
+const texts = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+process.stdout.write(JSON.stringify(texts.map(t => [window.Frontier.countWords(t), window.Frontier.firstClause(t)])));
+"""
+
+WORD_CASES = [
+    "", "one two  three\nfour", "a - b | c", "今天天气很好。", "これは日本語です", "カタカナ", "你好，世界！", "「你好」",
+    "안녕하세요 세계", "저는 학생입니다.", "Riemann 是一个阅读工具 for Sam", "GPT-4 发布了", "他说「好。」然后走了。",
+    "𠀀𠀁 extension B", "ｶﾀｶﾅ half width", "々 and 〆 and 〇", "mixed。English。 sentence", "\n\n今天\n天气\n",
+    "Plain prose. Two sentences here.", "日本語の文章です。次の文です！最後？",
+]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_js_and_python_count_words_and_first_clause_alike(tmp_path):
+    from riemann.abstraction.chunk import word_count
+    from riemann.abstraction.frontier import _first_clause
+
+    path = tmp_path / "texts.json"
+    path.write_text(json.dumps(WORD_CASES))
+    js = json.loads(subprocess.run(
+        ["node", "-e", WORDS_SCRIPT, str(ROOT / "web" / "frontier.js"), str(path)],
+        capture_output=True, text=True, check=True,
+    ).stdout)
+    for text, (n, clause) in zip(WORD_CASES, js):
+        assert n == word_count(text), f"word count differs for {text!r}"
+        assert clause == _first_clause(text), f"first clause differs for {text!r}"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_js_visible_words_match_python_on_a_cjk_tree(tmp_path):
+    """visibleWords counts a skim node's title and key points; for Chinese
+    (no spaces) that used to be one word per string."""
+    from riemann.abstraction.frontier import visible_words
+    from riemann.abstraction.model import Node
+
+    def node(nid, **kw):
+        base = dict(id=nid, depth=0, text="", words=0, source_span=(0, 1))
+        base.update(kw)
+        return Node(**base)
+
+    nodes = {
+        "r": node("r", text="根节点摘要。", words=5, children=["a", "b"], hook="钩子一句话"),
+        "a": node("a", depth=1, text="第一部分的摘要内容在这里。", words=12, children=["a1"], parent="r",
+                  title="第一部分", key_points=["要点一很重要", "要点二也是"], hook="为什么重要"),
+        "b": node("b", depth=1, text="第二部分。", words=5, parent="r", is_leaf=True),
+        "a1": node("a1", depth=2, text="叶子。", words=2, parent="a", is_leaf=True),
+    }
+    tree = Tree(id="t", title="T", source_text="x", source_words=20, root="r", nodes=nodes, max_depth=2, status="done")
+    path = tmp_path / "tree.json"
+    path.write_text(tree.model_dump_json())
+    script = """
+    const fs = require('fs'); global.window = {};
+    eval(fs.readFileSync(process.argv[1], 'utf8'));
+    const tree = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+    const out = [window.Frontier.visibleWords(tree, ['r'], new Set()), window.Frontier.visibleWords(tree, ['a', 'b'], new Set())];
+    process.stdout.write(JSON.stringify(out));
+    """
+    js = json.loads(subprocess.run(["node", "-e", script, str(ROOT / "web" / "frontier.js"), str(path)],
+                                   capture_output=True, text=True, check=True).stdout)
+    assert js == [visible_words(tree, ["r"], set()), visible_words(tree, ["a", "b"], set())]
+    assert js[0] == 5  # the hook "钩子一句话": five characters, not one word
+    assert js[1] == 4 + 6 + 5 + 5  # title + two key points + leaf b

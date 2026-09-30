@@ -33,12 +33,28 @@ function tokenNode(token) {
 const GAIN_FRACTION = 0.15;
 const GAIN_WORDS = 25;
 
+// Word count that also works for CJK text (mirrors word_count in chunk.py): whitespace-separated
+// words, plus one per Han/Kana character, with CJK punctuation on its own not counting. Hangul is
+// spaced like English, so it counts by its spaces. Text without CJK is just the whitespace count.
+const CJK_CHARS =
+  "\u3040-\u309f\u30a0-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f\u{20000}-\u{2fa1f}";
+const CJK_PUNCT = "\u3000-\u3004\u3008-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65";
+const CJK_CHAR_RE = new RegExp("[" + CJK_CHARS + "]", "u");
+const CJK_PUNCT_ONLY_RE = new RegExp("^[" + CJK_PUNCT + "]+$", "u");
+const UNIT_RE = "[" + CJK_CHARS + "]|(?:(?![" + CJK_CHARS + "])\\S)+";
+
 function countWords(text) {
-  return ((text || "").match(/\S+/g) || []).length;
+  text = text || "";
+  if (!CJK_CHAR_RE.test(text)) return (text.match(/\S+/g) || []).length;
+  let n = 0;
+  for (const m of text.matchAll(new RegExp(UNIT_RE, "gu"))) {
+    if (!CJK_PUNCT_ONLY_RE.test(m[0])) n += 1;
+  }
+  return n;
 }
 
 function firstClause(text) {
-  const m = (text || "").match(/^[^.!?\n]{1,80}/);
+  const m = (text || "").match(/^[^.!?\u3002\uff01\uff1f\n]{1,80}/);
   return (m ? m[0] : text || "").trim();
 }
 
@@ -331,6 +347,8 @@ window.Frontier = {
   proseAtK,
   kToReveal,
   visibleWords,
+  countWords,
+  firstClause,
   findFrontierNodeAtOffset,
   PROSE,
 };

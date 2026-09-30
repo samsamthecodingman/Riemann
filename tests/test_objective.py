@@ -26,8 +26,8 @@ def test_objective_in_tree_id():
 
 
 def test_schema_version():
-    assert cache.SCHEMA_VERSION == "schema5"
-    assert cache.build_version().endswith("-schema5")
+    assert cache.SCHEMA_VERSION == "schema6"
+    assert cache.build_version().endswith("-schema6")
 
 
 def test_focus_block_in_prompt_and_faithfulness_kept():

@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import re
 
+from riemann.abstraction.chunk import word_count
 from riemann.abstraction.model import Tree
 
 
@@ -109,11 +110,11 @@ def _frontier_of(tree: Tree, expanded: set[str]) -> list[str]:
 
 
 def _count(text: str | None) -> int:
-    return len((text or "").split())
+    return word_count(text or "")
 
 
 def _first_clause(text: str) -> str:
-    m = re.match(r"^[^.!?\n]{1,80}", text or "")
+    m = re.match(r"^[^.!?。！？\n]{1,80}", text or "")
     return (m.group(0) if m else (text or "")).strip()
 
 
