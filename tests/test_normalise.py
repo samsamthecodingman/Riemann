@@ -209,8 +209,8 @@ def test_numbered_heading_line_is_not_a_list_that_swallows_the_next_paragraph():
     )
     src = "Prepared for the Board, October 2025\n1. Section number one heading\n" + wrapped + "2. Method\n" + wrapped
     out = normalise_text(src)
-    assert "1. Section number one heading\n\nManagers usually" in out
-    assert "\n\n2. Method\n\nManagers usually" in out
+    assert "## 1. Section number one heading\n\nManagers usually" in out
+    assert "\n\n## 2. Method\n\nManagers usually" in out
     assert normalise_text(out) == out  # idempotent
 
 
@@ -236,3 +236,19 @@ def test_clean_extracted_unwraps_single_cell_tables_and_drops_permalinks():
 def test_clean_extracted_leaves_real_tables_alone():
     md = "| a | b |\n|---|---|\n| 1 | 2 |"
     assert ingest.clean_extracted(md) == md
+
+
+def test_dotted_numbered_headings_become_nested_markdown_headings():
+    wrapped = (
+        "Field surveys were carried out on 14 March at twelve\n"
+        "transects along the whole of the northern coast line\n"
+        "and each transect was measured twice by two people\n"
+        "using an RTK GPS receiver mounted on a survey pole.\n"
+        "Samples were then dried and sieved in the laboratory\n"
+        "before being weighed on a balance in grams.\n"
+    )
+    out = normalise_text("2. Methods\n" + wrapped + "2.1 Field work\n" + wrapped + "2.1.1 Sampling\n" + wrapped)
+    assert out.startswith("## 2. Methods\n\nField surveys")
+    assert "\n\n### 2.1 Field work\n\nField surveys" in out
+    assert "\n\n#### 2.1.1 Sampling\n\nField surveys" in out
+    assert normalise_text(out) == out

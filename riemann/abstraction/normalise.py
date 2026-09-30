@@ -251,18 +251,20 @@ def _rejoin_wrapped(lines: list[str]) -> str:
                 kind = "list"
             cur.append("- " + body)
         elif (
-            numbered
+            (hmatch := re.match(r"^(\d{1,2}(?:\.\d{1,2})*)[.)]?\s+(?=\S)", s))
             and kind != "list"
-            and re.match(r"^\d{1,2}(\.\d{1,2})*[.)]?$", numbered.group(1))
-            and heading_like(s[numbered.end():])
+            and heading_like(s[hmatch.end():])
             and nxt
             and not is_item_line(nxt)
             and nxt[:1].isupper()
         ):
-            # "2. Method" on a line of its own, followed by prose: a numbered
-            # heading, not a one-item list that swallows the next paragraph.
+            # "2. Method" / "2.1 Data" on a line of its own, followed by prose:
+            # a numbered heading, not a one-item list that swallows the next
+            # paragraph. Emitted as a markdown heading so the chunker keeps
+            # the section ("2." -> ##, "2.1" -> ###).
             close()
-            blocks.append(("p", [s]))
+            depth = hmatch.group(1).count(".") + 2
+            blocks.append(("p", ["#" * min(depth, 6) + " " + s]))
         elif numbered:
             if kind != "list":
                 close()
