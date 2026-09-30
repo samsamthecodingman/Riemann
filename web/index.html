@@ -57,6 +57,11 @@
           <p class="composer-note">Articles, blog posts and Wikipedia pages work best.</p>
         </div>
 
+        <div class="goal-row" role="radiogroup" aria-labelledby="goal-label">
+          <span class="goal-label" id="goal-label">What's this for?</span>
+          <div class="goal-chips" id="goal-chips"></div>
+        </div>
+
         <div class="composer-foot">
           <label class="model-picker">
             <span class="model-label">Model</span>
@@ -88,6 +93,15 @@
         </div>
       </aside>
     </div>
+
+    <details class="checkin" id="checkin">
+      <summary><span class="checkin-title">How are you right now?</span><span class="checkin-opt" id="checkin-state">optional</span></summary>
+      <div class="checkin-body">
+        <p class="composer-note checkin-note">One tap each, skip any. It only changes where a document opens, stays on this device, and goes stale after a few hours.</p>
+        <div id="checkin-groups"></div>
+        <button type="button" class="checkin-clear" id="checkin-clear" hidden>Clear</button>
+      </div>
+    </details>
 
     <section id="recent-block" class="recent" hidden>
       <h2 class="recent-heading">Pick up where you left off</h2>
@@ -127,7 +141,7 @@
   <header id="app-header">
     <button id="home-btn" title="Back to the home page" aria-label="Home page">&#8962;</button>
     <div id="title-block">
-      <span id="doc-title"></span>
+      <span class="doc-title-row"><span id="doc-title"></span><span id="doc-objective" class="obj-pill" hidden></span></span>
       <span id="doc-hook"></span>
     </div>
     <div class="header-spacer"></div>
@@ -139,6 +153,7 @@
       <span class="mini-dots" aria-hidden="true"><span id="mini-dot-0"></span><span id="mini-dot-1"></span><span id="mini-dot-2"></span></span>
       Palette
     </button>
+    <span id="adjust-note" class="adjust-note" hidden><span id="adjust-text"></span> <button type="button" id="adjust-undo">undo</button></span>
     <div class="zoom-pill">
       <button id="zoom-less" type="button" aria-label="Less detail">&minus; Less</button>
       <div
@@ -224,6 +239,7 @@
 
 <div id="live-region" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
 
+<script src="objective.js"></script>
 <script src="frontier.js"></script>
 <script src="maplayout.js"></script>
 <script src="map.js"></script>

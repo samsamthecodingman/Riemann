@@ -685,15 +685,18 @@
     if (isOpen) scheduleRedraw();
   }
 
-  function open() {
-    setOpen(true);
+  function open(opts) {
+    setOpen(true, opts);
   }
-  function close() {
-    setOpen(false);
+  function close(opts) {
+    setOpen(false, opts);
+  }
+  function isOpenNow() {
+    return isOpen;
   }
   function toggle() {
     setOpen(!isOpen);
   }
 
-  window.RiemannMap = { init, update, open, close, toggle };
+  window.RiemannMap = { init, update, open, close, toggle, isOpen: isOpenNow };
 })();

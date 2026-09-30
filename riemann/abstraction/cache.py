@@ -41,10 +41,14 @@ def build_version() -> str:
     )
 
 
-def tree_id_for(text: str, model: str | None = None) -> str:
-    """Content hash of the source, plus the model that summarises it, so the
-    same document built with a different model is a separate tree."""
+def tree_id_for(text: str, model: str | None = None, objective: str | None = None) -> str:
+    """Content hash of the source, plus the model that summarises it and the
+    reader's objective, so the same document built with a different model or
+    goal is a separate tree. With no objective the id is unchanged, so
+    existing cached trees keep their ids."""
     key = text if model is None else f"{model}\n{text}"
+    if objective:
+        key = f"objective:{objective}\n{key}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
@@ -92,6 +96,7 @@ def recent_trees(limit: int = 20) -> list[dict]:
                 "title": tree.title,
                 "words": tree.source_words,
                 "model": tree.model,
+                "objective": tree.objective,
                 "updated": mtime,
             }
         )

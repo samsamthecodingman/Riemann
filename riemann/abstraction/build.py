@@ -85,6 +85,63 @@ SYSTEM_PROVISIONAL = """You are producing a fast provisional one-line gist for a
 State the single most important conclusion or takeaway in <= 25 words, not what the document is about.
 Respond with ONLY JSON, no prose outside it and no markdown code fences: {"text": "..."}"""
 
+# Reader-goal focus blocks. These steer WHAT to foreground; the faithfulness
+# rules in the base template stay absolute and are restated in each block.
+# FakeSummariser detects the block via the "Reader's goal: <key>" marker.
+_FOCUS_TAIL = (
+    "\nThis changes emphasis only. Every claim, number, date and title must still be supported by the source;"
+    " never invent requirements, deadlines or options that the source does not state."
+)
+OBJECTIVE_FOCUS: dict[str, str] = {
+    "execute": (
+        "Reader's goal: execute\n"
+        "The reader must DO something with this document (an assignment, brief or task), not study it. Lead with"
+        " what must be produced, then requirements, constraints, marking criteria, deadlines and steps. Phrase"
+        " titles as tasks or requirements (e.g. \"Submit a 2,000-word report by Friday\"). Fill \"steps\""
+        " whenever the content describes a process or things to do. Prefer a deadline, weighting or word/size"
+        " limit found in the text for \"key_fact\". Background and explanation come last and stay brief."
+        + _FOCUS_TAIL
+    ),
+    "learn": (
+        "Reader's goal: learn\n"
+        "The reader wants to understand and retain this. Foreground the concepts, the explanations and the why"
+        " (the causal links the source gives), and how ideas relate. Titles name the idea or claim."
+        + _FOCUS_TAIL
+    ),
+    "decide": (
+        "Reader's goal: decide\n"
+        "The reader must make a decision. Foreground the options, the trade-offs, the evidence for and against,"
+        " and any stated recommendation or criteria. Titles name the option or the trade-off."
+        + _FOCUS_TAIL
+    ),
+    "reference": (
+        "Reader's goal: reference\n"
+        "The reader will look things up. Foreground facts, definitions, names, values and where things are, so"
+        " each piece can be found quickly. Titles name the thing a section covers."
+        + _FOCUS_TAIL
+    ),
+    "plan": (
+        "Reader's goal: plan\n"
+        "The reader is planning something. Foreground dependencies, sequencing, dates, resources and constraints."
+        " Fill \"steps\" when there is an order. Titles name the phase or milestone."
+        + _FOCUS_TAIL
+    ),
+    "communicate": (
+        "Reader's goal: communicate\n"
+        "The reader needs to reply or respond to someone. Foreground the ask, who is asking, by when, and what"
+        " is needed from the reader. Titles state the ask or the point to answer."
+        + _FOCUS_TAIL
+    ),
+}
+
+
+def with_objective(system: str, objective: str | None) -> str:
+    """Append the objective's focus block to a system prompt (no-op for an
+    unknown or missing objective)."""
+    focus = OBJECTIVE_FOCUS.get(objective or "")
+    return f"{system}\n\n{focus}" if focus else system
+
+
 _JSON_RETRY_NOTE = "\n\nYour previous response was not valid JSON. Respond with ONLY valid JSON, no prose, no code fences."
 
 
@@ -356,7 +413,9 @@ def get_builder(tree_id: str) -> TreeBuilder | None:
     return BUILDS.get(tree_id)
 
 
-def start_build(tree_id: str, title: str, source_text: str, summariser: Summariser) -> TreeBuilder:
+def start_build(
+    tree_id: str, title: str, source_text: str, summariser: Summariser, objective: str | None = None
+) -> TreeBuilder:
     """Create a Tree + TreeBuilder and schedule the background build task."""
     tree = Tree(
         id=tree_id,
@@ -368,6 +427,7 @@ def start_build(tree_id: str, title: str, source_text: str, summariser: Summaris
         max_depth=0,
         status="building",
         provisional_root=False,
+        objective=objective if objective in OBJECTIVE_FOCUS else None,
     )
     builder = TreeBuilder(tree)
     BUILDS[tree_id] = builder
@@ -448,7 +508,9 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
 
     # 1. Fast provisional root, emitted before any `level` event.
     prov_prompt = _provisional_prompt(source_text, tree.title)
-    prov_result = await _call_summariser_json(summariser, prov_prompt, SYSTEM_PROVISIONAL)
+    prov_result = await _call_summariser_json(
+        summariser, prov_prompt, with_objective(SYSTEM_PROVISIONAL, tree.objective)
+    )
     prov_text = str(prov_result.get("text", "")).strip() or "(gist coming...)"
     prov_id = _new_id(counter, (0, len(source_text)))
     prov_node = Node(
@@ -480,7 +542,7 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
             child_words = sum(nodes[c].words for c in group_ids)
             target = max(1, round(child_words / RATIO))
             system_template = SYSTEM_ROOT_TEMPLATE if is_root_call else SYSTEM_SUMMARY_TEMPLATE
-            system = system_template.replace("{{TARGET}}", str(target))
+            system = with_objective(system_template.replace("{{TARGET}}", str(target)), tree.objective)
             prompt, leaf_ctx_ids = _build_prompt(nodes, group_ids)
 
             result = await _call_summariser_json(summariser, prompt, system)

@@ -242,6 +242,16 @@ def get_summariser(model: str | None = None) -> Summariser:
     return ProxySummariser(model=model)
 
 
+_GOAL_RE = re.compile(r"Reader's goal: (\w+)")
+_GOAL_TITLE_PREFIX = {
+    "execute": "Do",
+    "learn": "Learn",
+    "decide": "Decide",
+    "reference": "Ref",
+    "plan": "Plan",
+    "communicate": "Reply",
+}
+
 _TARGET_RE = re.compile(r"Target length: about (\d+) words")
 _CHILD_IDS_RE = re.compile(r"^Child ids \(in order\): (.*)$", re.MULTILINE)
 _LEAF_IDS_RE = re.compile(r"^Leaf ids you may cite \(in order\): (.*)$", re.MULTILINE)
@@ -293,12 +303,25 @@ class FakeSummariser:
 
         importance = {cid: 0.5 for cid in child_ids}
 
+        goal_match = _GOAL_RE.search(system)
+        goal = goal_match.group(1) if goal_match else None
+
         title = " ".join(words[:5]) if words else "Untitled"
         hook = " ".join(words[:15]) if words else ""
         child_titles = {cid: " ".join((f"About {cid}").split()[:8]) for cid in child_ids}
         short_title = " ".join(words[:2])[:24].strip() or None
         child_short_titles = {cid: f"Part {cid[-4:]}" for cid in child_ids}
         key_points = [chunk for chunk in (" ".join(words[i : i + 4]) for i in range(0, min(len(words), 8), 4)) if chunk]
+
+        if goal in _GOAL_TITLE_PREFIX:
+            prefix = _GOAL_TITLE_PREFIX[goal]
+            title = f"{prefix}: {title}"
+            child_titles = {cid: f"{prefix}: {t}" for cid, t in child_titles.items()}
+        steps = (
+            [chunk for chunk in (" ".join(words[i : i + 3]) for i in range(0, min(len(words), 9), 3)) if chunk]
+            if goal in ("execute", "plan")
+            else []
+        )
 
         result = {
             "text": text,
@@ -311,6 +334,6 @@ class FakeSummariser:
             "child_short_titles": child_short_titles,
             "key_points": key_points,
             "key_fact": None,
-            "steps": [],
+            "steps": steps,
         }
         return json.dumps(result)

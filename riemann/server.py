@@ -29,9 +29,11 @@ async def api_abstract(request: Request) -> dict:
     content_type = request.headers.get("content-type", "")
 
     model: str | None = None
+    objective: str | None = None
     if content_type.startswith("multipart/form-data"):
         form = await request.form()
         model = form.get("model") or None
+        objective = form.get("objective") or None
         upload = form.get("file")
         if upload is None:
             raise HTTPException(400, "expected a 'file' field")
@@ -43,6 +45,7 @@ async def api_abstract(request: Request) -> dict:
         except json.JSONDecodeError:
             raise HTTPException(400, "expected JSON body with 'text' or 'url'")
         model = (body or {}).get("model") or None
+        objective = (body or {}).get("objective") or None
         url = (body or {}).get("url")
         raw_text = (body or {}).get("text")
         if url:
@@ -61,14 +64,18 @@ async def api_abstract(request: Request) -> dict:
     model = model or default_model()
     if model in BLOCKED_MODELS:
         raise HTTPException(400, f"model '{model}' is not allowed")
-    tree_id = cache.tree_id_for(text, model)
+    if objective is not None:
+        objective = str(objective).strip().lower()
+        if objective not in build.OBJECTIVE_FOCUS:
+            raise HTTPException(400, f"unknown objective '{objective}'")
+    tree_id = cache.tree_id_for(text, model, objective)
 
     if cache.exists(tree_id):
         return {"tree_id": tree_id, "cached": True}
 
     if build.get_builder(tree_id) is None:
         summariser = get_summariser(model=model)
-        builder = build.start_build(tree_id, title, text, summariser)
+        builder = build.start_build(tree_id, title, text, summariser, objective=objective)
         builder.tree.model = model
 
     return {"tree_id": tree_id, "cached": False}

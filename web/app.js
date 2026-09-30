@@ -799,6 +799,10 @@
     const tree = state.tree;
     const root = tree.nodes[tree.root];
     $docTitle.textContent = (tree.title || "").toUpperCase();
+    const $obj = el("doc-objective");
+    const objLabel = objectiveLabel(tree.objective);
+    $obj.hidden = !objLabel;
+    $obj.textContent = objLabel || "";
     let hookText = (root && (root.hook || root.text)) || "";
     if (tree.provisional_root) hookText += " · gist coming…";
     $docHook.textContent = hookText;
@@ -1610,9 +1614,10 @@
   // ---------------------------------------------------------------------
   // Tree loading
   // ---------------------------------------------------------------------
-  function initialZForTree(tree) {
+  function initialZForTree(tree, targetMinutes) {
+    const target = targetMinutes || 2;
     const totalMinutes = tree.source_words / WPM;
-    if (totalMinutes <= 2) return 1.0;
+    if (totalMinutes <= target) return 1.0;
     const sequence = window.Frontier.buildExpansionSequence(tree, tree.root);
     const total = Math.max(1, sequence.length);
     let bestK = 0;
@@ -1621,7 +1626,7 @@
       const frontier = window.Frontier.frontierAtK(tree, sequence, k);
       const words = frontierWords(tree, frontier, window.Frontier.proseAtK(sequence, k));
       const minutes = words / WPM;
-      const diff = Math.abs(minutes - 2);
+      const diff = Math.abs(minutes - target);
       if (diff < bestDiff) {
         bestDiff = diff;
         bestK = k;
@@ -1629,6 +1634,32 @@
     }
     return bestK / total;
   }
+
+  // Check-in adjustment -------------------------------------------------
+  function applyAdjustment(adj) {
+    state.adjust = { label: adj.label, minutes: adj.minutes, mapWasOpen: false };
+    if (adj.minutes < 2 && window.RiemannMap && window.RiemannMap.isOpen()) {
+      state.adjust.mapWasOpen = true;
+      window.RiemannMap.close({ persist: false, restoreFocus: false });
+    }
+  }
+
+  function updateAdjustNote() {
+    const $note = el("adjust-note");
+    const a = state.adjust;
+    $note.hidden = !a;
+    if (a) el("adjust-text").textContent = `Adjusted for: ${a.label}`;
+  }
+
+  el("adjust-undo").addEventListener("click", () => {
+    const a = state.adjust;
+    if (!a || !state.tree) return;
+    state.adjust = null;
+    updateAdjustNote();
+    setZ(initialZForTree(state.tree, 2), "adjust-undo");
+    if (a.mapWasOpen && window.RiemannMap) window.RiemannMap.open({ persist: false });
+    logEvent("checkin_adjust_undo", { tree_id: state.tree.id });
+  });
 
   function openTree(tree, opts) {
     resetTopSpacer();
@@ -1648,7 +1679,18 @@
     state.anchorNodeId = anchorId;
     state.anchorOffset = saved ? saved.anchor_offset : null;
 
-    const z = saved ? saved.z : initialZForTree(tree);
+    // A fresh open (not a resume) may start shallower or deeper depending on
+    // the optional check-in. Presentation only: the tree itself is untouched.
+    state.adjust = null;
+    let z;
+    if (saved) {
+      z = saved.z;
+    } else {
+      const adj = checkinAdjustment();
+      z = initialZForTree(tree, adj ? adj.minutes : 2);
+      if (adj) applyAdjustment(adj);
+    }
+    updateAdjustNote();
     state.z = 0;
     const { frontier, prose } = window.Frontier.frontierAtZ(tree, state.sequence, z);
     state.frontier = frontier;
@@ -2032,25 +2074,193 @@
     updateModelNote();
   }
 
+  // Goal chips ("What's this for?") ---------------------------------------
+  const OBJ_KEY = "riemann:objective";
+  const OBJECTIVES = window.Objective.OBJECTIVES;
+  let manualObjective = null; // set when Sam taps a chip this visit
+  let suggestedObjective = null;
+  let rememberedObjective = null;
+  try {
+    const r = localStorage.getItem(OBJ_KEY);
+    if (OBJECTIVES.some((o) => o.key === r)) rememberedObjective = r;
+  } catch (e) {}
+
+  function objectiveLabel(key) {
+    const o = OBJECTIVES.find((x) => x.key === key);
+    return o ? o.label : null;
+  }
+
+  // Manual tap wins, then a fresh suggestion, then the last manual choice.
+  function currentObjective() {
+    return manualObjective || suggestedObjective || rememberedObjective || null;
+  }
+
+  function renderGoalChips() {
+    const cur = currentObjective();
+    const fromSuggestion = !manualObjective && cur && cur === suggestedObjective;
+    el("goal-chips").innerHTML = OBJECTIVES.map((o) => {
+      const on = o.key === cur;
+      return `<button type="button" role="radio" class="goal-chip${on ? " on" : ""}" data-obj="${o.key}" aria-checked="${on}" tabindex="${on || (!cur && o === OBJECTIVES[0]) ? 0 : -1}">${escapeHtml(o.label)}${on && fromSuggestion ? '<span class="goal-suggested"> (suggested)</span>' : ""}</button>`;
+    }).join("");
+  }
+
+  el("goal-chips").addEventListener("click", (e) => {
+    const chip = e.target.closest(".goal-chip");
+    if (!chip) return;
+    manualObjective = chip.dataset.obj;
+    rememberedObjective = manualObjective;
+    try {
+      localStorage.setItem(OBJ_KEY, manualObjective);
+    } catch (err) {}
+    renderGoalChips();
+    el("goal-chips").querySelector(".goal-chip.on").focus();
+  });
+  el("goal-chips").addEventListener("keydown", (e) => {
+    if (!["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp"].includes(e.key)) return;
+    const chips = Array.from(el("goal-chips").querySelectorAll(".goal-chip"));
+    const i = chips.indexOf(document.activeElement);
+    if (i < 0) return;
+    const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : -1;
+    chips[(i + step + chips.length) % chips.length].click();
+    e.preventDefault();
+  });
+
+  let suggestToken = 0;
+  async function refreshSuggestion() {
+    const token = ++suggestToken;
+    let title = "";
+    let text = "";
+    let format = activeTab;
+    if (activeTab === "paste") {
+      text = $pasteText.value.slice(0, 2000);
+      title = (text.split("\n").find((l) => l.trim()) || "").replace(/^#+\s*/, "").slice(0, 200);
+    } else if (activeTab === "url") {
+      title = $urlInput.value.trim();
+    } else if (chosenFile) {
+      title = chosenFile.name;
+      if (/\.(md|txt)$/i.test(chosenFile.name) || /^text\//.test(chosenFile.type)) {
+        try {
+          text = await chosenFile.slice(0, 4000).text();
+        } catch (e) {}
+      }
+    }
+    if (token !== suggestToken) return;
+    suggestedObjective = window.Objective.suggestObjective({ title, format, text });
+    renderGoalChips();
+  }
+  const refreshSuggestionSoon = debounce(refreshSuggestion, 250);
+  $pasteText.addEventListener("input", refreshSuggestionSoon);
+  $urlInput.addEventListener("input", refreshSuggestionSoon);
+  $fileInput.addEventListener("change", refreshSuggestion);
+  el("composer").querySelector(".composer-tabs").addEventListener("click", refreshSuggestionSoon);
+  renderGoalChips();
+
+  // Check-in ("How are you right now?") -----------------------------------
+  // Optional and local. Stored in localStorage with a timestamp, stale after
+  // 4 hours, logged as a `checkin` event. It only shifts presentation (start
+  // depth, whether the Map opens) and never touches the summaries.
+  const CHECKIN_KEY = "riemann:checkin";
+  const CHECKIN_TTL_MS = 4 * 3600 * 1000;
+  const CHECKIN_GROUPS = [
+    { key: "capacity", label: "Energy", options: [["low", "Low"], ["okay", "Okay"], ["good", "Good"]] },
+    { key: "mood", label: "Mood", options: [["flat", "Flat"], ["anxious", "Anxious"], ["fine", "Fine"], ["good", "Good"]] },
+    { key: "sleep", label: "Sleep last night", options: [["lt5", "<5h"], ["5to7", "5–7h"], ["7plus", "7h+"]] },
+    { key: "caffeine", label: "Caffeine", options: [["none", "None"], ["some", "Some"], ["lots", "Lots"]] },
+    { key: "meds", label: "Meds", options: [["not_today", "Not today"], ["kicking_in", "Kicking in"], ["working", "Working"], ["wearing_off", "Wearing off"], ["na", "N/A"]] },
+  ];
+
+  function loadCheckin() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(CHECKIN_KEY) || "null");
+      if (!raw || typeof raw.ts !== "number" || Date.now() - raw.ts > CHECKIN_TTL_MS) return null;
+      return raw;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function saveCheckin(c) {
+    try {
+      if (c) localStorage.setItem(CHECKIN_KEY, JSON.stringify(c));
+      else localStorage.removeItem(CHECKIN_KEY);
+    } catch (e) {}
+  }
+
+  function checkinAnswered(c) {
+    return c ? CHECKIN_GROUPS.filter((g) => c[g.key]).length : 0;
+  }
+
+  // Which presentation shift (if any) the current check-in calls for.
+  function checkinAdjustment() {
+    const c = loadCheckin();
+    if (!c) return null;
+    if (c.capacity === "low") return { minutes: 1, label: "low energy" };
+    if (c.meds === "wearing_off") return { minutes: 1, label: "meds wearing off" };
+    if (c.sleep === "lt5") return { minutes: 1, label: "short sleep" };
+    if (c.capacity === "good") return { minutes: 3, label: "good energy" };
+    return null;
+  }
+
+  function renderCheckin() {
+    const c = loadCheckin() || {};
+    el("checkin-groups").innerHTML = CHECKIN_GROUPS.map(
+      (g) => `<div class="checkin-group" role="radiogroup" aria-label="${escapeHtml(g.label)}">
+        <span class="checkin-label">${escapeHtml(g.label)}</span>
+        <div class="checkin-opts">${g.options
+          .map(([v, l]) => `<button type="button" role="radio" class="goal-chip checkin-chip${c[g.key] === v ? " on" : ""}" data-group="${g.key}" data-val="${v}" aria-checked="${c[g.key] === v}">${escapeHtml(l)}</button>`)
+          .join("")}</div>
+      </div>`
+    ).join("");
+    const n = checkinAnswered(c);
+    el("checkin-state").textContent = n ? "noted" : "optional";
+    el("checkin-clear").hidden = !n;
+  }
+
+  el("checkin-groups").addEventListener("click", (e) => {
+    const chip = e.target.closest(".checkin-chip");
+    if (!chip) return;
+    const c = loadCheckin() || {};
+    const g = chip.dataset.group;
+    if (c[g] === chip.dataset.val) delete c[g]; // tap again to unset
+    else c[g] = chip.dataset.val;
+    c.ts = Date.now();
+    saveCheckin(checkinAnswered(c) ? c : null);
+    const { ts, ...answers } = c;
+    logEvent("checkin", answers);
+    flushEvents(false);
+    renderCheckin();
+    const again = el("checkin-groups").querySelector(`[data-group="${g}"][data-val="${chip.dataset.val}"]`);
+    if (again) again.focus();
+  });
+  el("checkin-clear").addEventListener("click", () => {
+    saveCheckin(null);
+    logEvent("checkin", { cleared: true });
+    renderCheckin();
+  });
+  renderCheckin();
+
   // Build ---------------------------------------------------------------
   async function build() {
     clearStartError();
     let body;
     let multipart = false;
     const model = currentModel();
+    const objective = currentObjective();
+    if (objective) rememberedObjective = objective;
     if (activeTab === "paste") {
       const text = $pasteText.value.trim();
       if (!text) return showStartError("Paste some text first.");
-      body = { text, model };
+      body = { text, model, objective };
     } else if (activeTab === "url") {
       const url = $urlInput.value.trim();
       if (!url) return showStartError("Enter a link first.");
-      body = { url, model };
+      body = { url, model, objective };
     } else {
       if (!chosenFile) return showStartError("Choose a file first.");
       body = new FormData();
       body.append("file", chosenFile);
       body.append("model", model);
+      if (objective) body.append("objective", objective);
       multipart = true;
     }
 
@@ -2115,6 +2325,7 @@
       el("recent-list").innerHTML = items
         .map((it, i) => {
           const meta = [
+            objectiveLabel(it.objective),
             `${(it.words || 0).toLocaleString()} words`,
             `${Math.max(1, Math.round((it.words || 0) / WPM))} min read`,
             it.model ? modelLabel(it.model) : null,
