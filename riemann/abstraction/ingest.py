@@ -218,6 +218,36 @@ def fetch_error_message(exc: Exception) -> str:
     return str(exc) or type(exc).__name__
 
 
+_SEPARATOR_ROW_RE = re.compile(r"^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$")
+
+
+def clean_extracted(markdown: str) -> str:
+    """Repair trafilatura's markdown for pages built with layout tables or
+    doc-generator permalinks: a "table" that is really one cell of prose (some
+    essay sites wrap the whole article in one) is unwrapped to plain text, and
+    the trailing pilcrow permalink on headings ("# Tutorials¶") is dropped.
+    Real tables (with a separator row, or more than one cell) are untouched."""
+    lines = markdown.split("\n")
+    has_separator = any(_SEPARATOR_ROW_RE.match(ln) and "-" in ln and "|" in ln for ln in lines)
+    out: list[str] = []
+    for ln in lines:
+        stripped = ln.strip()
+        if re.match(r"^#{1,6}\s", stripped):
+            ln = re.sub(r"\s*¶\s*$", "", ln)
+        elif not has_separator and stripped.startswith("|") and stripped.endswith("|") and len(stripped) > 2:
+            inner = stripped[1:-1]
+            if "|" not in inner and inner.strip():
+                ln = inner.strip()
+            elif "|" not in inner:
+                ln = ""
+        elif not has_separator and stripped.startswith("| ") and "|" not in stripped[2:]:
+            ln = stripped[2:].strip()  # opening pipe only (cell continues on a later line)
+        elif not has_separator and stripped.endswith(" |") and "|" not in stripped[:-2]:
+            ln = stripped[:-2].rstrip()  # closing pipe only
+        out.append(ln)
+    return "\n".join(out)
+
+
 async def from_url(url: str) -> tuple[str, str]:
     """Fetch a URL and extract clean markdown via trafilatura."""
     import trafilatura
@@ -239,8 +269,10 @@ async def from_url(url: str) -> tuple[str, str]:
     if not extracted:
         raise ValueError(f"Could not extract readable content from {url}")
 
+    extracted = clean_extracted(extracted)
     metadata = trafilatura.extract_metadata(html, default_url=url)
     title = (metadata.title if metadata and metadata.title else None) or _title_from_text(
         extracted, url
     )
+    title = re.sub(r"\s*¶\s*", " ", title).strip()
     return (title, normalise_text(extracted))

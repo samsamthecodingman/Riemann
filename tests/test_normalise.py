@@ -223,3 +223,16 @@ def test_real_numbered_list_is_still_a_list():
     )
     out = normalise_text(src)
     assert "1. Submit the report through the portal\n2. Attend the demonstration session" in out
+
+
+def test_clean_extracted_unwraps_single_cell_tables_and_drops_permalinks():
+    md = "| November 2022 In the books I read as a kid, reading was replaced.\nMore prose. |\n\n# Tutorials¶\n\n## Key principles ¶\n\nBody."
+    out = ingest.clean_extracted(md)
+    assert out.startswith("November 2022 In the books")
+    assert not out.startswith("|") and "More prose.\n" in out + "\n" and "|" not in out
+    assert "# Tutorials\n" in out and "## Key principles\n" in out and "¶" not in out
+
+
+def test_clean_extracted_leaves_real_tables_alone():
+    md = "| a | b |\n|---|---|\n| 1 | 2 |"
+    assert ingest.clean_extracted(md) == md
