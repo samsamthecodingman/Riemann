@@ -2691,3 +2691,10 @@ body.col-dragging * {
     scroll-behavior: auto !important;
   }
 }
+
+/* Programmatic focus targets (set after a screen change): no ring. */
+#title-block:focus,
+.home-hero h1:focus,
+#loading-heading:focus {
+  outline: none;
+}

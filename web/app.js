@@ -293,6 +293,14 @@
     scheduleAnnounce(valuetext);
   }
 
+  // Move keyboard focus to a non-interactive landmark without scrolling or a
+  // visible ring (used after a screen change hides the control that had it).
+  function focusQuietly(elem) {
+    if (!elem) return;
+    if (!elem.hasAttribute("tabindex")) elem.setAttribute("tabindex", "-1");
+    elem.focus({ preventScroll: true });
+  }
+
   function scheduleAnnounce(text) {
     clearTimeout(state.announceTimer);
     state.announceTimer = setTimeout(() => {
@@ -1961,6 +1969,11 @@
     maybeShowHint();
     if (window.RiemannMap) window.RiemannMap.update();
 
+    // The screen just changed under a keyboard or screen-reader user (the
+    // button they pressed is now hidden): say what opened and park focus on the
+    // header, so Tab continues into its controls rather than starting from nothing.
+    scheduleAnnounce(`Opened ${tree.title || "document"}. ${$dial.getAttribute("aria-valuetext") || ""}`.trim());
+    focusQuietly(el("title-block"));
   }
 
   window.addEventListener(
@@ -2042,6 +2055,7 @@
     $loading.setAttribute("aria-busy", "true");
     el("loading-doc").textContent = title || "";
     el("loading-heading").textContent = "Building your gist";
+    focusQuietly(el("loading-heading"));
     el("loading-gist").hidden = true;
     el("loading-error").hidden = true;
     setLoadingStep("read");
@@ -2117,6 +2131,7 @@
     // still returns to the document because that fires hashchange.
     if (location.hash) history.pushState(null, "", location.pathname + location.search);
     showStartScreen();
+    focusQuietly(document.querySelector(".home-hero h1"));
   }
 
   function goToTree(treeId) {
