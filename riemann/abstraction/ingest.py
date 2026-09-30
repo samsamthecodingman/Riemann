@@ -248,15 +248,77 @@ def clean_extracted(markdown: str) -> str:
     return "\n".join(out)
 
 
+MAX_FETCH_BYTES = 15 * 1024 * 1024
+MAX_REDIRECTS = 5
+
+
+def _ip_is_public(ip: str) -> bool:
+    import ipaddress
+
+    addr = ipaddress.ip_address(ip)
+    mapped = getattr(addr, "ipv4_mapped", None)
+    if mapped is not None:
+        addr = mapped
+    return addr.is_global
+
+
+async def check_public_url(url: str) -> None:
+    """Refuse a URL the server should not fetch on a stranger's behalf:
+    any scheme but http(s), and any host that is or resolves to a loopback,
+    private, link-local, reserved or otherwise non-public address (this
+    server sits next to local services such as the model proxy). Set
+    RIEMANN_ALLOW_PRIVATE_URLS=1 to allow local addresses on purpose."""
+    import asyncio
+    import os
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https"):
+        raise ValueError("only http and https links work")
+    host = parts.hostname
+    if not host:
+        raise ValueError("that does not look like a valid link")
+    if os.environ.get("RIEMANN_ALLOW_PRIVATE_URLS") == "1":
+        return
+    try:
+        infos = await asyncio.get_running_loop().getaddrinfo(host, parts.port or (443 if parts.scheme == "https" else 80))
+    except OSError as exc:
+        raise ValueError("could not find that address") from exc
+    for info in infos:
+        if not _ip_is_public(info[4][0]):
+            raise ValueError("that link points at a private or local address, so Riemann will not fetch it")
+
+
+async def _fetch_html(url: str) -> str:
+    """GET with every hop (the first URL and each redirect) checked by
+    check_public_url, and the body capped at MAX_FETCH_BYTES."""
+    from urllib.parse import urljoin
+
+    async with httpx.AsyncClient(follow_redirects=False, timeout=20.0) as client:
+        for _ in range(MAX_REDIRECTS + 1):
+            await check_public_url(url)
+            async with client.stream("GET", url, headers={"User-Agent": "riemann/0.1"}) as resp:
+                if resp.is_redirect and resp.headers.get("location"):
+                    url = urljoin(url, resp.headers["location"])
+                    continue
+                resp.raise_for_status()
+                chunks: list[bytes] = []
+                size = 0
+                async for chunk in resp.aiter_bytes():
+                    size += len(chunk)
+                    if size > MAX_FETCH_BYTES:
+                        raise ValueError("that page is too large to fetch")
+                    chunks.append(chunk)
+                return b"".join(chunks).decode(resp.encoding or "utf-8", errors="replace")
+        raise ValueError("too many redirects")
+
+
 async def from_url(url: str) -> tuple[str, str]:
     """Fetch a URL and extract clean markdown via trafilatura."""
     import trafilatura
 
     url = clean_url(url)
-    async with httpx.AsyncClient(follow_redirects=True, timeout=20.0) as client:
-        resp = await client.get(url, headers={"User-Agent": "riemann/0.1"})
-        resp.raise_for_status()
-        html = resp.text
+    html = await _fetch_html(url)
 
     extracted = trafilatura.extract(
         html,
