@@ -967,7 +967,9 @@ kbd {
   grid-row: 2;
   min-width: 0;
   padding: 36px 48px 55vh;
+  container: reader / inline-size;
 }
+
 
 #top-spacer { height: 0; }
 
@@ -1024,6 +1026,15 @@ kbd {
   column-gap: 36px;
   row-gap: 28px;
   margin-top: 18px;
+}
+
+/* The two-column flow needs room: below ~560px of reading width each column would be
+   under 250px (about 20 characters a line, and 9 at 1100px wide with the nav and rail
+   open). Fall back to one column there. */
+@container reader (max-width: 559px) {
+  .section-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .node {
@@ -1824,6 +1835,7 @@ body.minimal-chrome #app.active {
 
 body.minimal-chrome #content {
   padding-top: 2rem;
+  width: 100%; /* inline-size containment (the reader container) would otherwise shrink an auto-margin box to 0 */
   max-width: 1200px;
   margin: 0 auto;
 }
