@@ -51,12 +51,19 @@ async def api_abstract(request: Request) -> dict:
     else:
         try:
             body = await request.json()
-        except json.JSONDecodeError:
+        except ValueError:  # bad JSON or bad UTF-8
             raise HTTPException(400, "expected JSON body with 'text' or 'url'")
-        model = (body or {}).get("model") or None
-        objective = (body or {}).get("objective") or None
-        url = (body or {}).get("url")
-        raw_text = (body or {}).get("text")
+        if body is not None and not isinstance(body, dict):
+            raise HTTPException(400, "expected a JSON object with 'text' or 'url'")
+        body = body or {}
+        model = body.get("model") or None
+        objective = body.get("objective") or None
+        url = body.get("url")
+        raw_text = body.get("text")
+        for field in (model, url, raw_text):
+            if field is not None and not isinstance(field, str):
+                raise HTTPException(400, "'text', 'url' and 'model' must be strings")
+        url = url.strip() if url else None
         if url:
             try:
                 title, text = await ingest.from_url(url)

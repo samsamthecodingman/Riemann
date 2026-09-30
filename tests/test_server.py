@@ -290,3 +290,11 @@ async def test_post_events_rejects_malformed_bodies_with_400():
         not_list = await client.post("/api/events", json={"a": 1})
     assert (bad_json.status_code, not_objects.status_code, not_list.status_code) == (400, 400, 400)
     assert not events_module.log_path().exists()
+
+
+@pytest.mark.parametrize("body", [[1], "str", {"text": 123}, {"text": "hi", "model": ["a"]}, {"url": 5}])
+async def test_abstract_rejects_wrongly_typed_bodies_with_400(body):
+    async with await _client() as client:
+        r = await client.post("/api/abstract", json=body)
+    assert r.status_code == 400
+    assert not build.BUILDS
