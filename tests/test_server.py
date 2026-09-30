@@ -146,9 +146,10 @@ async def test_model_choice_is_a_separate_tree_and_recorded():
         assert recent[b]["model"] == "gemini-3.8-flash-high"
 
 
-async def test_blocked_model_is_refused():
+@pytest.mark.parametrize("model", ["claude-opus-5", "claude-sonnet-5"])
+async def test_blocked_model_is_refused(model):
     async with await _client() as client:
-        resp = await client.post("/api/abstract", json={"text": "hello " * 50, "model": "claude-opus-5"})
+        resp = await client.post("/api/abstract", json={"text": "hello " * 50, "model": model})
         assert resp.status_code == 400
 
 
@@ -156,10 +157,10 @@ async def test_models_endpoint_filters(monkeypatch):
     import riemann.server as server_module
 
     async def fake_list():
-        return [{"id": "claude-sonnet-5", "provider": "anthropic"}]
+        return [{"id": "claude-sonnet-5-5", "provider": "anthropic"}]
 
     monkeypatch.setattr(server_module, "list_models", fake_list)
     async with await _client() as client:
         data = (await client.get("/api/models")).json()
         assert data["default"]
-        assert data["models"] == [{"id": "claude-sonnet-5", "provider": "anthropic"}]
+        assert data["models"] == [{"id": "claude-sonnet-5-5", "provider": "anthropic"}]

@@ -111,11 +111,12 @@ class ModelCooldownError(RuntimeError):
 
 
 def default_model() -> str:
-    return os.environ.get("RIEMANN_MODEL", "claude-sonnet-5")
+    return os.environ.get("RIEMANN_MODEL", "claude-sonnet-5-5")
 
 
-# Never offered, whatever the proxy lists (Sam's standing rule).
-BLOCKED_MODELS = {"claude-opus-5"}
+# Never offered, whatever the proxy lists (Sam's standing rule: Opus 5.5 and
+# Sonnet 5.5 replace these).
+BLOCKED_MODELS = {"claude-opus-5", "claude-sonnet-5"}
 # Not text chat models: image/video generators and single-purpose endpoints.
 _NON_TEXT = re.compile(r"image|video|codex-auto-review")
 

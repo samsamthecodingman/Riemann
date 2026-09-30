@@ -1796,15 +1796,15 @@
 
   // Model picker ------------------------------------------------------
   const MODEL_KEY = "riemann:model";
-  const RECOMMENDED = ["claude-sonnet-5", "claude-opus-5-5", "claude-haiku-4-5-20251001", "gemini-3.8-flash-high"];
+  const RECOMMENDED = ["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-4-5-20251001", "gemini-3.8-flash-high"];
   const MODEL_NOTES = {
-    "claude-sonnet-5": "Balanced quality and speed.",
+    "claude-sonnet-5-5": "Balanced quality and speed.",
     "claude-opus-5-5": "Strongest summaries, slower.",
     "claude-haiku-4-5-20251001": "Fastest, lighter summaries.",
     "gemini-3.8-flash-high": "Fast, and uses Gemini quota instead of Claude.",
   };
   const PROVIDER_NAMES = { anthropic: "Anthropic", openai: "OpenAI", xai: "xAI", antigravity: "Antigravity" };
-  let defaultModel = "claude-sonnet-5";
+  let defaultModel = "claude-sonnet-5-5";
 
   function modelLabel(id) {
     const parts = id.split("-").filter((p) => !/^\d{8}$/.test(p));

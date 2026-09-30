@@ -45,7 +45,7 @@ async def test_proxy_summariser_request_shape_and_parsing():
             json={"choices": [{"message": {"content": '{"text": "a summary"}'}}]},
         )
 
-    summariser = ProxySummariser(model="claude-sonnet-5")
+    summariser = ProxySummariser(model="claude-sonnet-5-5")
     summariser._api_key = "test-key-123"
 
     async def fake_summarise(prompt, system):
@@ -72,7 +72,7 @@ async def test_proxy_summariser_end_to_end_with_mock_transport(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/v1/chat/completions"
         body = json.loads(request.content)
-        assert body["model"] == "claude-sonnet-5"
+        assert body["model"] == "claude-sonnet-5-5"
         assert body["messages"][0]["role"] == "system"
         assert body["messages"][1]["role"] == "user"
         assert body["temperature"] == 0.2
@@ -81,7 +81,7 @@ async def test_proxy_summariser_end_to_end_with_mock_transport(monkeypatch):
             json={"choices": [{"message": {"content": '{"text": "hello"}'}}]},
         )
 
-    summariser = ProxySummariser(model="claude-sonnet-5", base_url="http://127.0.0.1:8317")
+    summariser = ProxySummariser(model="claude-sonnet-5-5", base_url="http://127.0.0.1:8317")
     summariser._api_key = None
 
     import riemann.abstraction.summarise as summarise_module
@@ -108,7 +108,7 @@ async def test_proxy_summariser_model_cooldown_error(monkeypatch):
             json={"error": {"code": "model_cooldown", "message": "cooling down"}},
         )
 
-    summariser = ProxySummariser(model="claude-sonnet-5")
+    summariser = ProxySummariser(model="claude-sonnet-5-5")
     summariser._api_key = None
 
     import httpx as httpx_module
@@ -126,7 +126,7 @@ async def test_proxy_summariser_model_cooldown_error(monkeypatch):
     finally:
         monkeypatch.setattr(httpx_module, "AsyncClient", original_async_client)
 
-    assert "claude-sonnet-5" in str(exc_info.value)
+    assert "claude-sonnet-5-5" in str(exc_info.value)
     assert "another model" in str(exc_info.value)
 
 
@@ -146,8 +146,9 @@ async def test_list_models_drops_blocked_and_non_text(monkeypatch):
     from riemann.abstraction import summarise
 
     payload = {"data": [
-        {"id": "claude-sonnet-5", "owned_by": "anthropic"},
+        {"id": "claude-sonnet-5-5", "owned_by": "anthropic"},
         {"id": "claude-opus-5", "owned_by": "anthropic"},
+        {"id": "claude-sonnet-5", "owned_by": "anthropic"},
         {"id": "gpt-image-2", "owned_by": "openai"},
         {"id": "grok-imagine-video", "owned_by": "xai"},
         {"id": "gemini-3.8-flash-high", "owned_by": "antigravity"},
@@ -159,4 +160,4 @@ async def test_list_models_drops_blocked_and_non_text(monkeypatch):
     real = httpx.AsyncClient
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
     ids = [m["id"] for m in await summarise.list_models()]
-    assert ids == ["claude-sonnet-5", "gemini-3.8-flash-high"]
+    assert ids == ["claude-sonnet-5-5", "gemini-3.8-flash-high"]
