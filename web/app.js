@@ -2622,7 +2622,38 @@
   // ---------------------------------------------------------------------
   // Boot
   // ---------------------------------------------------------------------
+  // Right-to-left text (Arabic, Hebrew): give every text block dir="auto" so
+  // its base direction and alignment follow its own first strong character.
+  // A no-op for left-to-right text. Applied by an observer so it covers every
+  // render of the reader, rail, section nav and map without touching each.
+  const BIDI_SELECTOR = [
+    ".ov-title", ".ov-what", ".ov-item dd", ".ov-item dt > span", ".section-hook", ".section-header h1", ".node-title",
+    ".node-body p", ".node-body li", ".node-body h1", ".node-body h2", ".node-body h3", ".node-body h4", ".node-body td",
+    ".node-body th", ".node-body blockquote", ".key-points li", ".fact-big", ".fact-detail", ".up-next-title", ".up-next-hook",
+    ".nav-title", "#rail li", ".root-hero h1", ".root-hero p", ".map-title", "#doc-title", "#doc-hook",
+  ].join(",");
+  function autoDir(root) {
+    if (root.nodeType !== 1) return;
+    if (root.matches(BIDI_SELECTOR) && !root.hasAttribute("dir")) root.setAttribute("dir", "auto");
+    root.querySelectorAll(BIDI_SELECTOR).forEach((e) => {
+      if (!e.hasAttribute("dir")) e.setAttribute("dir", "auto");
+    });
+  }
+  function watchBidi() {
+    const obs = new MutationObserver((muts) => {
+      for (const m of muts) m.addedNodes.forEach(autoDir);
+    });
+    for (const id of ["content", "rail", "section-nav", "map-world", "app-header"]) {
+      const node = document.getElementById(id);
+      if (node) {
+        autoDir(node);
+        obs.observe(node, { childList: true, subtree: true });
+      }
+    }
+  }
+
   async function boot() {
+    watchBidi();
     if (window.RiemannCols) window.RiemannCols.init({ keepReadingPosition });
     if (window.RiemannMap) {
       window.RiemannMap.init({
