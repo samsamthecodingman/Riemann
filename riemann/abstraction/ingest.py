@@ -113,6 +113,9 @@ def _from_pdf(filename: str, content: bytes) -> tuple[str, str]:
     return (title, text)
 
 
+MAX_DOCX_XML_BYTES = 40 * 1024 * 1024  # word/document.xml inflated; a 300-page report is about 2 MB
+
+
 _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 
@@ -172,7 +175,16 @@ def _from_docx(filename: str, content: bytes) -> tuple[str, str]:
 
     try:
         with zipfile.ZipFile(io.BytesIO(content)) as z:
-            root = ElementTree.fromstring(z.read("word/document.xml"))
+            info = z.getinfo("word/document.xml")
+            if info.file_size > MAX_DOCX_XML_BYTES:  # the declared size, before anything is inflated
+                raise ValueError("that Word file is too large to read")
+            with z.open(info) as fh:
+                data = fh.read(MAX_DOCX_XML_BYTES + 1)  # and a hard stop if the header lied
+            if len(data) > MAX_DOCX_XML_BYTES:
+                raise ValueError("that Word file is too large to read")
+            root = ElementTree.fromstring(data)
+    except ValueError:
+        raise
     except Exception as exc:  # noqa: BLE001 - not a real docx
         raise ValueError("could not read that Word file; is it a .docx?") from exc
     body = root.find(_W + "body")
