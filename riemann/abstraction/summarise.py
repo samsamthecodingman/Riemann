@@ -19,6 +19,11 @@ class Summariser(Protocol):
         ...
 
 
+class ModelError(RuntimeError):
+    """A model failure whose message is fit to show to the reader as it stands
+    (the build's error event and the loading screen use it verbatim)."""
+
+
 def strip_code_fence(text: str) -> str:
     """Strip a ```json ... ``` or ``` ... ``` wrapper if present."""
     stripped = text.strip()
@@ -32,14 +37,21 @@ def parse_json_robustly(text: str) -> dict:
     """Parse JSON text, stripping code fences and trimming stray prose."""
     candidate = strip_code_fence(text)
     try:
-        return json.loads(candidate)
+        parsed = json.loads(candidate)
+        if isinstance(parsed, dict):
+            return parsed
     except json.JSONDecodeError:
         pass
-    # Fall back: grab the first {...} span.
+    # Fall back: grab the first {...} span (also rescues a non-object top level).
     start = candidate.find("{")
     end = candidate.rfind("}")
     if start != -1 and end != -1 and end > start:
-        return json.loads(candidate[start : end + 1])
+        try:
+            parsed = json.loads(candidate[start : end + 1])
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            return parsed
     raise ValueError(f"Could not parse JSON from summariser output: {text[:200]!r}")
 
 
@@ -106,7 +118,7 @@ def _read_proxy_api_key() -> str | None:
     return None
 
 
-class ModelCooldownError(RuntimeError):
+class ModelCooldownError(ModelError):
     pass
 
 

@@ -17,7 +17,7 @@ import re
 
 from riemann.abstraction.chunk import TINY_DOC_WORDS, chunk, word_count
 from riemann.abstraction.model import Essential, KeyFact, Node, Overview, Tree
-from riemann.abstraction.summarise import Summariser, parse_json_robustly
+from riemann.abstraction.summarise import ModelError, Summariser, parse_json_robustly
 
 RATIO = 3  # compression per step; Forte's practitioner funnel suggests 2.5-4x (weak evidence)
 GIST_WORDS = 25
@@ -508,7 +508,10 @@ async def _call_summariser_json(summariser: Summariser, prompt: str, system: str
     result = await _call_json(summariser, prompt + _JSON_RETRY_NOTE, system)
     if result is not None:
         return result
-    raise ValueError(f"Summariser did not return valid JSON after retry (prompt started: {prompt[:120]!r})")
+    raise ModelError(
+        "The model did not return a usable reply (it was not the JSON Riemann asked for), even after a second try. "
+        "Try building again, or pick a different model."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -719,7 +722,12 @@ async def _run_build(builder: TreeBuilder, summariser: Summariser) -> None:
         await _run_build_inner(builder, summariser)
     except Exception as exc:  # noqa: BLE001 - surfaced to clients via the error event
         tree.status = "error"
-        await builder._emit("error", {"message": str(exc) or type(exc).__name__})
+        if isinstance(exc, ModelError):
+            message = str(exc)
+        else:
+            logging.getLogger("riemann").exception("build failed")
+            message = f"Something went wrong while building ({type(exc).__name__}). Nothing was saved; try again."
+        await builder._emit("error", {"message": message})
 
 
 async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None:
@@ -916,9 +924,19 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
         groups = _group_leaves(current_level, boundary_keys) if height == 0 else _group_run(current_level)
         is_final_round = len(groups) == 1
 
-        results = await asyncio.gather(
-            *[process_group(group, is_root_call=is_final_round, force=False) for group in groups]
-        )
+        tasks = [
+            asyncio.ensure_future(process_group(group, is_root_call=is_final_round, force=False))
+            for group in groups
+        ]
+        try:
+            results = await asyncio.gather(*tasks)
+        except BaseException:
+            # One group failed: stop the rest now. gather() alone leaves its
+            # siblings running, spending model calls on a build that is over.
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
 
         new_level = [nid for nid, _ in results]
         new_nodes = [node for _, node in results if node is not None]
