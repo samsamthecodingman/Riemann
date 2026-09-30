@@ -65,6 +65,8 @@ class Tree(BaseModel):
     max_depth: int = 0
     status: Literal["building", "done", "error"] = "building"
     provisional_root: bool = False
+    model: str | None = None
+    """The summariser model that built this tree (None for older trees)."""
     sections: list[str] = Field(default_factory=list)
     """Node ids at the section level: the first depth from the root with
     >=2 nodes. Empty for a single-leaf tree or a tree that never branches

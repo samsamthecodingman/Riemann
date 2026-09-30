@@ -41,8 +41,11 @@ def build_version() -> str:
     )
 
 
-def tree_id_for(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+def tree_id_for(text: str, model: str | None = None) -> str:
+    """Content hash of the source, plus the model that summarises it, so the
+    same document built with a different model is a separate tree."""
+    key = text if model is None else f"{model}\n{text}"
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
 def path_for(tree_id: str) -> Path:
@@ -88,6 +91,7 @@ def recent_trees(limit: int = 20) -> list[dict]:
                 "id": tree.id,
                 "title": tree.title,
                 "words": tree.source_words,
+                "model": tree.model,
                 "updated": mtime,
             }
         )

@@ -19,7 +19,7 @@ def _riemann_data_dir(tmp_path, monkeypatch):
 def _fake_summariser(monkeypatch):
     import riemann.server as server_module
 
-    monkeypatch.setattr(server_module, "get_summariser", lambda: FakeSummariser())
+    monkeypatch.setattr(server_module, "get_summariser", lambda model=None: FakeSummariser())
     yield
 
 
@@ -131,3 +131,35 @@ def test_cache_same_text_same_id(tmp_path, monkeypatch):
     id1 = cache.tree_id_for(text)
     id2 = cache.tree_id_for(text)
     assert id1 == id2
+
+
+async def test_model_choice_is_a_separate_tree_and_recorded():
+    text = "# Doc\n\n" + "word " * 200
+    async with await _client() as client:
+        a = (await client.post("/api/abstract", json={"text": text})).json()["tree_id"]
+        b = (await client.post("/api/abstract", json={"text": text, "model": "gemini-3.8-flash-high"})).json()["tree_id"]
+        assert a != b
+        await _wait_for_done(b)
+        tree = (await client.get(f"/api/tree/{b}")).json()
+        assert tree["model"] == "gemini-3.8-flash-high"
+        recent = {t["id"]: t for t in (await client.get("/api/recent")).json()}
+        assert recent[b]["model"] == "gemini-3.8-flash-high"
+
+
+async def test_blocked_model_is_refused():
+    async with await _client() as client:
+        resp = await client.post("/api/abstract", json={"text": "hello " * 50, "model": "claude-opus-5"})
+        assert resp.status_code == 400
+
+
+async def test_models_endpoint_filters(monkeypatch):
+    import riemann.server as server_module
+
+    async def fake_list():
+        return [{"id": "claude-sonnet-5", "provider": "anthropic"}]
+
+    monkeypatch.setattr(server_module, "list_models", fake_list)
+    async with await _client() as client:
+        data = (await client.get("/api/models")).json()
+        assert data["default"]
+        assert data["models"] == [{"id": "claude-sonnet-5", "provider": "anthropic"}]

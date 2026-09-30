@@ -51,7 +51,7 @@ class ClaudeSummariser:
     """
 
     def __init__(self, model: str | None = None) -> None:
-        self.model = model or os.environ.get("RIEMANN_MODEL", "claude-sonnet-5")
+        self.model = model or default_model()
 
     async def summarise(self, prompt: str, system: str) -> str:
         from claude_agent_sdk import ClaudeAgentOptions, query
@@ -110,6 +110,41 @@ class ModelCooldownError(RuntimeError):
     pass
 
 
+def default_model() -> str:
+    return os.environ.get("RIEMANN_MODEL", "claude-sonnet-5")
+
+
+# Never offered, whatever the proxy lists (Sam's standing rule).
+BLOCKED_MODELS = {"claude-opus-5"}
+# Not text chat models: image/video generators and single-purpose endpoints.
+_NON_TEXT = re.compile(r"image|video|codex-auto-review")
+
+
+async def list_models() -> list[dict]:
+    """Text models the local proxy can serve, as [{id, provider}], for the
+    model picker. Empty list if the proxy is unreachable (the picker then
+    offers just the default)."""
+    import httpx
+
+    base = (os.environ.get("RIEMANN_PROXY_URL") or ProxySummariser.DEFAULT_URL).rstrip("/")
+    key = os.environ.get("RIEMANN_PROXY_KEY") or _read_proxy_api_key()
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{base}/v1/models", headers=headers)
+            resp.raise_for_status()
+            data = resp.json().get("data", [])
+    except Exception:  # noqa: BLE001 - the picker degrades to the default model
+        return []
+    out = []
+    for m in data:
+        mid = m.get("id")
+        if not mid or mid in BLOCKED_MODELS or _NON_TEXT.search(mid):
+            continue
+        out.append({"id": mid, "provider": m.get("owned_by") or ""})
+    return out
+
+
 class ProxySummariser:
     """Summariser backed by Sam's local CLIProxyAPI (an OpenAI-compatible
     proxy), so summarisation doesn't spend Agent SDK credit.
@@ -122,7 +157,7 @@ class ProxySummariser:
     DEFAULT_URL = "http://127.0.0.1:8317"
 
     def __init__(self, model: str | None = None, base_url: str | None = None) -> None:
-        self.model = model or os.environ.get("RIEMANN_MODEL", "claude-sonnet-5")
+        self.model = model or default_model()
         self.base_url = (base_url or os.environ.get("RIEMANN_PROXY_URL") or self.DEFAULT_URL).rstrip("/")
         self._api_key = os.environ.get("RIEMANN_PROXY_KEY") or _read_proxy_api_key()
 
@@ -185,7 +220,7 @@ class ProxySummariser:
         if code == "model_cooldown":
             raise ModelCooldownError(
                 f"Model '{self.model}' is in cooldown on the proxy. "
-                f"Set RIEMANN_MODEL to another model (e.g. 'gemini-3.8-flash-high') and retry."
+                f"Pick another model on the home page (e.g. 'gemini-3.8-flash-high') and try again."
             )
 
     async def _backoff(self) -> None:

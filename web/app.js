@@ -737,11 +737,7 @@
     $docHook.textContent = hookText;
   }
 
-  el("home-btn").addEventListener("click", () => {
-    resetTopSpacer();
-    setZ(0, "home");
-    window.scrollTo(0, 0);
-  });
+  el("home-btn").addEventListener("click", () => goHome());
 
   // ---------------------------------------------------------------------
   // Highlights: apply to DOM, add/edit toolbar
@@ -1525,16 +1521,18 @@
     if (saved) showResumeCard(anchorId);
     maybeShowHint();
 
-    window.addEventListener(
-      "scroll",
-      debounce(() => {
-        if (Date.now() - state.lastDialChangeAt < 400) return;
-        const centreId = findCentreNodeId();
-        if (centreId && centreId !== state.anchorNodeId) setAnchor(centreId);
-        updateReadout();
-      }, 150)
-    );
   }
+
+  window.addEventListener(
+    "scroll",
+    debounce(() => {
+      if (!state.tree || !$app.classList.contains("active")) return;
+      if (Date.now() - state.lastDialChangeAt < 400) return;
+      const centreId = findCentreNodeId();
+      if (centreId && centreId !== state.anchorNodeId) setAnchor(centreId);
+      updateReadout();
+    }, 150)
+  );
 
   function showResumeCard(anchorId) {
     const node = state.tree.nodes[anchorId];
@@ -1572,9 +1570,26 @@
 
   function showStartScreen() {
     stopLoading();
+    if (state.tree && $app.classList.contains("active")) {
+      savePosition();
+      logEvent("close", { tree_id: state.tree.id });
+      flushEvents(false);
+    }
+    state.tree = null;
+    state.dwellNode = null;
+    state.dwellStart = 0;
+    clearGhosts();
+    hideHighlightToolbar();
+    if (state.paletteOpen) {
+      state.paletteOpen = false;
+      renderPaletteOpenState();
+    }
+    resetTopSpacer();
     $loading.hidden = true;
     $app.classList.remove("active");
     $startScreen.style.display = "";
+    document.title = "Riemann";
+    window.scrollTo(0, 0);
     loadRecent();
   }
 
@@ -1648,70 +1663,286 @@
     });
   }
 
-  el("loading-back").addEventListener("click", showStartScreen);
+  el("loading-back").addEventListener("click", () => goHome());
 
   // ---------------------------------------------------------------------
-  // Start screen wiring
+  // Routing: #/t/<tree id> is a document, anything else is the home page.
+  // The browser's Back button and the header's home button both land home.
   // ---------------------------------------------------------------------
+  const TREE_HASH = /^#\/t\/([0-9a-f]+)$/;
+
+  function goHome() {
+    // pushState (not location.hash = "") so the URL has no stray "#"; Back
+    // still returns to the document because that fires hashchange.
+    if (location.hash) history.pushState(null, "", location.pathname + location.search);
+    showStartScreen();
+  }
+
+  function goToTree(treeId) {
+    const hash = `#/t/${treeId}`;
+    if (location.hash === hash) route();
+    else location.hash = hash;
+  }
+
+  async function route() {
+    const m = location.hash.match(TREE_HASH);
+    if (!m) {
+      showStartScreen();
+      return;
+    }
+    if (state.tree && state.tree.id === m[1] && $app.classList.contains("active")) return;
+    try {
+      await openTreeById(m[1]);
+    } catch (err) {
+      console.error(err);
+      history.replaceState(null, "", location.pathname + location.search);
+      showStartScreen();
+      showStartError(err.message || "Could not open that document.");
+    }
+  }
+
+  window.addEventListener("hashchange", route);
+
+  async function openTreeById(treeId) {
+    const resp = await fetch(`/api/tree/${treeId}`);
+    if (!resp.ok) throw new Error("Could not find that document. It may have been built by an older version.");
+    const tree = await resp.json();
+    document.title = `${tree.title || "Document"} · Riemann`;
+    if (tree.status === "done") openTree(tree);
+    else if (tree.status === "error") throw new Error("That document's build failed. Try building it again.");
+    else showLoading(tree.id, tree.title);
+  }
+
+  // ---------------------------------------------------------------------
+  // Home: composer (paste / file / link), model picker, recent documents
+  // ---------------------------------------------------------------------
+  const $pasteText = el("paste-text");
+  const $urlInput = el("url-input");
+  const $fileInput = el("file-input");
+  const $buildBtn = el("build-btn");
+  const $modelSelect = el("model-select");
+  const $composer = el("composer");
+  let activeTab = "paste";
+  let chosenFile = null;
+
   function showStartError(msg) {
     const $err = el("paste-error");
     $err.textContent = msg;
     $err.hidden = false;
   }
 
-  async function submitAbstract(body, isMultipart, $btn) {
+  function clearStartError() {
     el("paste-error").hidden = true;
-    const label = $btn ? $btn.textContent : null;
-    if ($btn) { $btn.disabled = true; $btn.textContent = "Starting…"; }
+  }
+
+  function selectTab(name, focus) {
+    activeTab = name;
+    for (const tab of document.querySelectorAll(".composer-tab")) {
+      const on = tab.dataset.tab === name;
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+      tab.tabIndex = on ? 0 : -1;
+      el(tab.getAttribute("aria-controls")).hidden = !on;
+      if (on && focus) tab.focus();
+    }
+    clearStartError();
+  }
+
+  el("composer").querySelector(".composer-tabs").addEventListener("click", (e) => {
+    const tab = e.target.closest(".composer-tab");
+    if (tab) selectTab(tab.dataset.tab);
+  });
+  el("composer").querySelector(".composer-tabs").addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    const order = ["paste", "file", "url"];
+    const i = order.indexOf(activeTab) + (e.key === "ArrowRight" ? 1 : -1);
+    selectTab(order[(i + order.length) % order.length], true);
+    e.preventDefault();
+  });
+
+  function updatePasteCount() {
+    const words = ($pasteText.value.trim().match(/\S+/g) || []).length;
+    el("paste-count").textContent = words ? `${words.toLocaleString()} words · ~${Math.max(1, Math.round(words / WPM))} min to read in full` : "";
+  }
+  $pasteText.addEventListener("input", () => {
+    updatePasteCount();
+    clearStartError();
+  });
+
+  function setFile(file) {
+    chosenFile = file || null;
+    el("dropzone").classList.toggle("has-file", !!chosenFile);
+    el("dropzone-title").textContent = chosenFile ? chosenFile.name : "Drop a file here, or click to choose";
+    clearStartError();
+  }
+  $fileInput.addEventListener("change", (e) => setFile(e.target.files[0]));
+
+  // Dropping a file anywhere on the composer switches to the File tab.
+  $composer.addEventListener("dragover", (e) => {
+    if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes("Files")) return;
+    e.preventDefault();
+    $composer.classList.add("drag-over");
+  });
+  $composer.addEventListener("dragleave", (e) => {
+    if (!$composer.contains(e.relatedTarget)) $composer.classList.remove("drag-over");
+  });
+  $composer.addEventListener("drop", (e) => {
+    $composer.classList.remove("drag-over");
+    const file = e.dataTransfer && e.dataTransfer.files[0];
+    if (!file) return;
+    e.preventDefault();
+    selectTab("file");
+    setFile(file);
+  });
+
+  // Model picker ------------------------------------------------------
+  const MODEL_KEY = "riemann:model";
+  const RECOMMENDED = ["claude-sonnet-5", "claude-opus-5-5", "claude-haiku-4-5-20251001", "gemini-3.8-flash-high"];
+  const MODEL_NOTES = {
+    "claude-sonnet-5": "Balanced quality and speed.",
+    "claude-opus-5-5": "Strongest summaries, slower.",
+    "claude-haiku-4-5-20251001": "Fastest, lighter summaries.",
+    "gemini-3.8-flash-high": "Fast, and uses Gemini quota instead of Claude.",
+  };
+  const PROVIDER_NAMES = { anthropic: "Anthropic", openai: "OpenAI", xai: "xAI", antigravity: "Antigravity" };
+  let defaultModel = "claude-sonnet-5";
+
+  function modelLabel(id) {
+    const parts = id.split("-").filter((p) => !/^\d{8}$/.test(p));
+    const out = [];
+    for (const p of parts) {
+      const prev = out[out.length - 1];
+      if (/^\d$/.test(p) && prev && /^\d+(\.\d+)?$/.test(prev) && !prev.includes(".")) out[out.length - 1] = `${prev}.${p}`;
+      else out.push(p);
+    }
+    return out
+      .map((p) => (["gpt", "oss"].includes(p) ? p.toUpperCase() : p.charAt(0).toUpperCase() + p.slice(1)))
+      .join(" ");
+  }
+
+  function loadModelChoice() {
     try {
-      const resp = await fetch("/api/abstract", isMultipart ? { method: "POST", body } : {
+      return localStorage.getItem(MODEL_KEY);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function currentModel() {
+    return $modelSelect.value || defaultModel;
+  }
+
+  function updateModelNote() {
+    const id = currentModel();
+    const note = MODEL_NOTES[id] || "";
+    el("model-note").textContent = id === defaultModel ? (note ? `${note} This is the default.` : "The default.") : note;
+  }
+
+  $modelSelect.addEventListener("change", () => {
+    try {
+      localStorage.setItem(MODEL_KEY, $modelSelect.value);
+    } catch (e) {}
+    updateModelNote();
+  });
+
+  async function loadModels() {
+    let models = [];
+    try {
+      const resp = await fetch("/api/models");
+      if (resp.ok) {
+        const data = await resp.json();
+        defaultModel = data.default || defaultModel;
+        models = data.models || [];
+      }
+    } catch (e) {}
+    const ids = new Set(models.map((m) => m.id));
+    ids.add(defaultModel);
+    const opt = (id) => `<option value="${escapeHtml(id)}">${escapeHtml(modelLabel(id))}${id === defaultModel ? " (default)" : ""}</option>`;
+    const rec = [defaultModel, ...RECOMMENDED.filter((id) => id !== defaultModel && ids.has(id))];
+    const groups = {};
+    for (const m of models) {
+      if (rec.includes(m.id)) continue;
+      (groups[m.provider] = groups[m.provider] || []).push(m.id);
+    }
+    let html = `<optgroup label="Recommended">${rec.map(opt).join("")}</optgroup>`;
+    for (const provider of Object.keys(groups).sort()) {
+      const list = groups[provider].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+      html += `<optgroup label="${escapeHtml(PROVIDER_NAMES[provider] || provider || "Other")}">${list.map(opt).join("")}</optgroup>`;
+    }
+    $modelSelect.innerHTML = html;
+    const saved = loadModelChoice();
+    $modelSelect.value = saved && ids.has(saved) ? saved : defaultModel;
+    updateModelNote();
+  }
+
+  // Build ---------------------------------------------------------------
+  async function build() {
+    clearStartError();
+    let body;
+    let multipart = false;
+    const model = currentModel();
+    if (activeTab === "paste") {
+      const text = $pasteText.value.trim();
+      if (!text) return showStartError("Paste some text first.");
+      body = { text, model };
+    } else if (activeTab === "url") {
+      const url = $urlInput.value.trim();
+      if (!url) return showStartError("Enter a link first.");
+      body = { url, model };
+    } else {
+      if (!chosenFile) return showStartError("Choose a file first.");
+      body = new FormData();
+      body.append("file", chosenFile);
+      body.append("model", model);
+      multipart = true;
+    }
+
+    const label = $buildBtn.textContent;
+    $buildBtn.disabled = true;
+    $buildBtn.textContent = "Starting…";
+    try {
+      const resp = await fetch("/api/abstract", multipart ? { method: "POST", body } : {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
       if (!resp.ok) {
         let detail = "";
-        try { detail = (await resp.json()).detail || ""; } catch (_) {}
+        try {
+          detail = (await resp.json()).detail || "";
+        } catch (_) {}
         throw new Error(detail || "Could not build that. Try again.");
       }
       const data = await resp.json();
-      await openTreeById(data.tree_id);
+      goToTree(data.tree_id);
     } catch (err) {
       console.error(err);
-      showStartScreen();
       showStartError(err.message || "Could not build that. Try again.");
     } finally {
-      if ($btn) { $btn.disabled = false; $btn.textContent = label; }
+      $buildBtn.disabled = false;
+      $buildBtn.textContent = label;
     }
   }
 
-  async function openTreeById(treeId) {
-    const resp = await fetch(`/api/tree/${treeId}`);
-    if (!resp.ok) throw new Error("Could not load that document.");
-    const tree = await resp.json();
-    if (tree.status === "done") openTree(tree);
-    else showLoading(tree.id, tree.title);
+  $buildBtn.addEventListener("click", build);
+  $urlInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") build();
+  });
+  $startScreen.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      build();
+    }
+  });
+
+  // Recent documents ----------------------------------------------------
+  function timeAgo(seconds) {
+    const diff = Math.max(0, Date.now() / 1000 - seconds);
+    if (diff < 60) return "just now";
+    if (diff < 3600) return `${Math.round(diff / 60)} min ago`;
+    if (diff < 86400) return `${Math.round(diff / 3600)} h ago`;
+    const days = Math.round(diff / 86400);
+    return days === 1 ? "yesterday" : `${days} days ago`;
   }
-
-  el("paste-submit").addEventListener("click", () => {
-    const text = el("paste-text").value.trim();
-    if (!text) return showStartError("Paste some text first.");
-    submitAbstract({ text }, false, el("paste-submit"));
-  });
-
-  el("url-submit").addEventListener("click", () => {
-    const url = el("url-input").value.trim();
-    if (!url) return showStartError("Enter a URL first.");
-    submitAbstract({ url }, false, el("url-submit"));
-  });
-
-  el("file-input").addEventListener("change", (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const form = new FormData();
-    form.append("file", file);
-    submitAbstract(form, true);
-  });
 
   async function loadRecent() {
     if (IS_FIXTURE) return;
@@ -1719,22 +1950,25 @@
       const resp = await fetch("/api/recent");
       if (!resp.ok) return;
       const items = await resp.json();
-      if (!items || items.length === 0) return;
-      const $list = el("recent-list");
-      $list.innerHTML = items
-        .map((it) => `<li><a href="#" data-tree-id="${it.id}">${escapeHtml(it.title)}</a></li>`)
+      if (!items || items.length === 0) {
+        el("recent-block").hidden = true;
+        return;
+      }
+      el("recent-list").innerHTML = items
+        .map((it, i) => {
+          const meta = [
+            `${(it.words || 0).toLocaleString()} words`,
+            `${Math.max(1, Math.round((it.words || 0) / WPM))} min read`,
+            it.model ? modelLabel(it.model) : null,
+            timeAgo(it.updated),
+          ].filter(Boolean);
+          return `<li><a class="recent-card" href="#/t/${escapeHtml(it.id)}" style="--card-hue: var(--sec-${(i % 5) + 1})">
+            <span class="recent-title">${escapeHtml(it.title || "Untitled")}</span>
+            <span class="recent-meta">${meta.map((m) => `<span>${escapeHtml(m)}</span>`).join("")}</span>
+          </a></li>`;
+        })
         .join("");
       el("recent-block").hidden = false;
-      $list.onclick = async (e) => {
-        const a = e.target.closest("[data-tree-id]");
-        if (!a) return;
-        e.preventDefault();
-        try {
-          await openTreeById(a.dataset.treeId);
-        } catch (err) {
-          showStartError(err.message);
-        }
-      };
     } catch (e) {}
   }
 
@@ -1750,7 +1984,8 @@
       openTree(tree);
       return;
     }
-    loadRecent();
+    loadModels();
+    route();
   }
 
   boot();

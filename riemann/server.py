@@ -17,7 +17,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from riemann import events
 from riemann.abstraction import build, cache, ingest
-from riemann.abstraction.summarise import get_summariser
+from riemann.abstraction.summarise import BLOCKED_MODELS, default_model, get_summariser, list_models
 
 app = FastAPI(title="Riemann")
 
@@ -28,8 +28,10 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 async def api_abstract(request: Request) -> dict:
     content_type = request.headers.get("content-type", "")
 
+    model: str | None = None
     if content_type.startswith("multipart/form-data"):
         form = await request.form()
+        model = form.get("model") or None
         upload = form.get("file")
         if upload is None:
             raise HTTPException(400, "expected a 'file' field")
@@ -40,6 +42,7 @@ async def api_abstract(request: Request) -> dict:
             body = await request.json()
         except json.JSONDecodeError:
             raise HTTPException(400, "expected JSON body with 'text' or 'url'")
+        model = (body or {}).get("model") or None
         url = (body or {}).get("url")
         raw_text = (body or {}).get("text")
         if url:
@@ -55,14 +58,18 @@ async def api_abstract(request: Request) -> dict:
     if not text.strip():
         raise HTTPException(400, "no content to abstract")
 
-    tree_id = cache.tree_id_for(text)
+    model = model or default_model()
+    if model in BLOCKED_MODELS:
+        raise HTTPException(400, f"model '{model}' is not allowed")
+    tree_id = cache.tree_id_for(text, model)
 
     if cache.exists(tree_id):
         return {"tree_id": tree_id, "cached": True}
 
     if build.get_builder(tree_id) is None:
-        summariser = get_summariser()
-        build.start_build(tree_id, title, text, summariser)
+        summariser = get_summariser(model=model)
+        builder = build.start_build(tree_id, title, text, summariser)
+        builder.tree.model = model
 
     return {"tree_id": tree_id, "cached": False}
 
@@ -113,6 +120,11 @@ async def api_events(request: Request) -> Response:
         raise HTTPException(400, "expected a JSON array of events")
     events.append_events(body)
     return Response(status_code=204)
+
+
+@app.get("/api/models")
+async def api_models() -> dict:
+    return {"default": default_model(), "models": await list_models()}
 
 
 @app.get("/api/recent")

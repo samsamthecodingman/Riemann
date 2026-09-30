@@ -127,7 +127,7 @@ async def test_proxy_summariser_model_cooldown_error(monkeypatch):
         monkeypatch.setattr(httpx_module, "AsyncClient", original_async_client)
 
     assert "claude-sonnet-5" in str(exc_info.value)
-    assert "RIEMANN_MODEL" in str(exc_info.value)
+    assert "another model" in str(exc_info.value)
 
 
 def test_get_summariser_factory_defaults_to_proxy(monkeypatch):
@@ -138,3 +138,25 @@ def test_get_summariser_factory_defaults_to_proxy(monkeypatch):
 def test_get_summariser_factory_agent_sdk(monkeypatch):
     monkeypatch.setenv("RIEMANN_PROVIDER", "agent-sdk")
     assert isinstance(get_summariser(), ClaudeSummariser)
+
+
+async def test_list_models_drops_blocked_and_non_text(monkeypatch):
+    import httpx
+
+    from riemann.abstraction import summarise
+
+    payload = {"data": [
+        {"id": "claude-sonnet-5", "owned_by": "anthropic"},
+        {"id": "claude-opus-5", "owned_by": "anthropic"},
+        {"id": "gpt-image-2", "owned_by": "openai"},
+        {"id": "grok-imagine-video", "owned_by": "xai"},
+        {"id": "gemini-3.8-flash-high", "owned_by": "antigravity"},
+    ]}
+
+    def handler(request):
+        return httpx.Response(200, json=payload)
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    ids = [m["id"] for m in await summarise.list_models()]
+    assert ids == ["claude-sonnet-5", "gemini-3.8-flash-high"]

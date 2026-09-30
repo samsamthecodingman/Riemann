@@ -17,34 +17,82 @@
 </div>
 
 <main id="start-screen">
-  <h1>Riemann</h1>
-  <p class="tagline">Paste something long. Zoom in on the parts you need.</p>
+  <div class="home">
+    <header class="home-top">
+      <span class="home-wordmark">Riemann</span>
+      <span class="home-dots" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></span>
+    </header>
 
-  <div class="start-block">
-    <label for="paste-text">Paste text</label>
-    <textarea id="paste-text" placeholder="Paste an article, a doc, a transcript&hellip;"></textarea>
-    <div class="start-row" style="margin-top: 0.75rem;">
-      <button id="paste-submit" class="primary-btn">Build</button>
-      <span id="paste-error" class="start-error" hidden></span>
+    <section class="home-hero">
+      <h1>Read anything at the depth you need.</h1>
+      <p class="home-lede">Paste text, drop a file or give a link. Riemann writes a 1–2 minute gist you can zoom into, passage by passage, all the way down to the original.</p>
+    </section>
+
+    <div class="home-grid">
+      <section class="composer" id="composer" aria-label="New document">
+        <div class="composer-tabs" role="tablist" aria-label="Source">
+          <button type="button" role="tab" class="composer-tab" id="tab-paste" aria-selected="true" aria-controls="pane-paste" data-tab="paste">Paste text</button>
+          <button type="button" role="tab" class="composer-tab" id="tab-file" aria-selected="false" aria-controls="pane-file" data-tab="file" tabindex="-1">File</button>
+          <button type="button" role="tab" class="composer-tab" id="tab-url" aria-selected="false" aria-controls="pane-url" data-tab="url" tabindex="-1">Link</button>
+        </div>
+
+        <div class="composer-pane" id="pane-paste" role="tabpanel" aria-labelledby="tab-paste">
+          <label for="paste-text" class="visually-hidden">Text to read</label>
+          <textarea id="paste-text" placeholder="Paste an article, a doc, lecture notes, a transcript&hellip;"></textarea>
+          <span class="composer-count" id="paste-count" aria-live="off"></span>
+        </div>
+
+        <div class="composer-pane" id="pane-file" role="tabpanel" aria-labelledby="tab-file" hidden>
+          <label class="dropzone" id="dropzone" for="file-input">
+            <span class="dropzone-icon" aria-hidden="true">&#8613;</span>
+            <span class="dropzone-title" id="dropzone-title">Drop a file here, or click to choose</span>
+            <span class="dropzone-sub">.md, .txt or .pdf</span>
+          </label>
+          <input id="file-input" class="visually-hidden" type="file" accept=".md,.txt,.pdf,text/markdown,text/plain,application/pdf" />
+        </div>
+
+        <div class="composer-pane" id="pane-url" role="tabpanel" aria-labelledby="tab-url" hidden>
+          <label for="url-input" class="visually-hidden">Link</label>
+          <input id="url-input" type="url" placeholder="https://&hellip;" />
+          <p class="composer-note">Articles, blog posts and Wikipedia pages work best.</p>
+        </div>
+
+        <div class="composer-foot">
+          <label class="model-picker">
+            <span class="model-label">Model</span>
+            <select id="model-select" aria-describedby="model-note"></select>
+          </label>
+          <span class="composer-spacer"></span>
+          <span class="composer-kbd" aria-hidden="true">Ctrl&nbsp;+&nbsp;Enter</span>
+          <button id="build-btn" class="primary-btn" type="button">Build gist</button>
+        </div>
+        <p id="model-note" class="composer-note model-note"></p>
+        <p id="paste-error" class="start-error" role="alert" hidden></p>
+      </section>
+
+      <aside class="how" aria-label="How it works">
+        <div class="how-card" style="--how: var(--sec-1)">
+          <span class="how-num">01</span>
+          <h2>Gist first</h2>
+          <p>Start from a one to two minute read of the whole thing.</p>
+        </div>
+        <div class="how-card" style="--how: var(--sec-2)">
+          <span class="how-num">02</span>
+          <h2>Zoom where you look</h2>
+          <p>Hold <kbd>Z</kbd> and move the mouse over a passage to open it up or fold it away.</p>
+        </div>
+        <div class="how-card" style="--how: var(--sec-4)">
+          <span class="how-num">03</span>
+          <h2>Down to the source</h2>
+          <p>Every summary links to the original paragraphs it came from.</p>
+        </div>
+      </aside>
     </div>
-  </div>
 
-  <div class="start-block">
-    <label for="file-input">Upload a file (.md, .txt, .pdf)</label>
-    <input id="file-input" type="file" accept=".md,.txt,.pdf,text/markdown,text/plain,application/pdf" />
-  </div>
-
-  <div class="start-block">
-    <label for="url-input">Or give a URL</label>
-    <div class="start-row">
-      <input id="url-input" type="url" placeholder="https://&hellip;" />
-      <button id="url-submit" class="primary-btn">Build</button>
-    </div>
-  </div>
-
-  <div id="recent-block" class="start-block" hidden>
-    <label>Recent</label>
-    <ul id="recent-list"></ul>
+    <section id="recent-block" class="recent" hidden>
+      <h2 class="recent-heading">Pick up where you left off</h2>
+      <ul id="recent-list" class="recent-grid"></ul>
+    </section>
   </div>
 </main>
 
@@ -77,7 +125,7 @@
 
 <div id="app">
   <header id="app-header">
-    <button id="home-btn" title="Home (z = 0)" aria-label="Home">&#8962;</button>
+    <button id="home-btn" title="Back to the home page" aria-label="Home page">&#8962;</button>
     <div id="title-block">
       <span id="doc-title"></span>
       <span id="doc-hook"></span>
