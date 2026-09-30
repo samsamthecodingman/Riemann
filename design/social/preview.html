@@ -1,0 +1,41 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Work+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0}
+body{width:1280px;height:640px;background:#FBF7F2;font-family:"Work Sans",sans-serif;color:#2A2521;overflow:hidden;position:relative}
+.left{position:absolute;left:84px;top:0;bottom:0;width:560px;display:flex;flex-direction:column;justify-content:center}
+.brand{display:flex;align-items:center;gap:14px;font-family:Fraunces,serif;font-size:34px;font-weight:600;margin-bottom:34px}
+.dots{display:flex;gap:7px}.dots i{width:14px;height:14px;border-radius:50%;display:block}
+h1{font-family:Fraunces,serif;font-weight:600;font-size:68px;line-height:1.02;letter-spacing:-.5px}
+p.sub{margin-top:26px;font-size:24px;line-height:1.45;color:#5E554C;max-width:500px}
+.stack{position:absolute;right:70px;top:0;bottom:0;width:520px;display:flex;flex-direction:column;justify-content:center;gap:16px}
+.card{position:relative;border-radius:22px;padding:22px 26px;box-shadow:0 10px 30px rgba(42,37,33,.08)}
+.lab{font-size:14px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:#5E554C;display:flex;justify-content:space-between}
+.lab b{font-weight:700;color:#2A2521}
+.t{font-family:Fraunces,serif;font-size:26px;font-weight:600;line-height:1.15;margin-top:10px}
+.bul{margin-top:12px;display:flex;flex-direction:column;gap:10px}
+.bul div{display:flex;gap:12px;align-items:center}.bul span{width:12px;height:12px;border-radius:50%;border:2px solid #C98E88;flex:none}
+.bar{height:11px;border-radius:6px;background:rgba(42,37,33,.16)}
+.c1{background:#F6D5D1;z-index:4}
+.c2{background:#D5E6CF;z-index:3;margin:0 18px}
+.c3{background:#F7E8B5;z-index:2;margin:0 36px}
+.c4{background:#D3E4F2;z-index:1;margin:0 54px}
+.src{display:flex;flex-direction:column;gap:9px;margin-top:14px}
+</style></head><body>
+<div class="left">
+  <div class="brand">Riemann <span class="dots"><i style="background:#F6D5D1"></i><i style="background:#D5E6CF"></i><i style="background:#F7E8B5"></i><i style="background:#D3E4F2"></i><i style="background:#E2D8F0"></i></span></div>
+  <h1>Read anything at the depth you need.</h1>
+  <p class="sub">Start from a one-minute gist, then zoom into any passage, all the way down to the original.</p>
+</div>
+<div class="stack">
+  <div class="card c1"><div class="lab"><span>Gist</span><b>~1 min</b></div>
+    <div class="t">The whole document in a few lines</div>
+    <div class="bul"><div><span></span><div class="bar" style="width:300px"></div></div><div><span></span><div class="bar" style="width:250px"></div></div></div></div>
+  <div class="card c2"><div class="lab"><span>Key points</span><b>~3 min</b></div>
+    <div class="bul"><div><span style="border-color:#8FB285"></span><div class="bar" style="width:280px"></div></div><div><span style="border-color:#8FB285"></span><div class="bar" style="width:220px"></div></div></div></div>
+  <div class="card c3"><div class="lab"><span>Summary</span><b>~8 min</b></div>
+    <div class="src"><div class="bar" style="width:100%"></div><div class="bar" style="width:88%"></div></div></div>
+  <div class="card c4"><div class="lab"><span>Original</span><b>¶ 1–42</b></div>
+    <div class="src"><div class="bar" style="width:100%;height:8px"></div><div class="bar" style="width:94%;height:8px"></div><div class="bar" style="width:70%;height:8px"></div></div></div>
+</div>
+</body></html>
