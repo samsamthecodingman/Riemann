@@ -2678,3 +2678,16 @@ body.col-dragging * {
     text-align: center;
   }
 }
+
+/* Reduced motion, catch-all: any transition or animation not named above
+   (the rail fade, hover lifts, map tiles) is switched off too. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
