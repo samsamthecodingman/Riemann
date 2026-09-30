@@ -18,6 +18,7 @@ TINY_DOC_WORDS = 60
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 _FENCE_RE = re.compile(r"^(```|~~~)")
 _NUMBERED_RE = re.compile(r"^\s*(\d+)[.)]\s+\S")
+_TABLE_ROW_RE = re.compile(r"^\s*\|.*\|\s*$")
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'(])")
 
 
@@ -94,6 +95,25 @@ def _split_blocks(text: str) -> list[_Block]:
                 if lines[j].strip().startswith(fence_marker):
                     j += 1
                     break
+                j += 1
+            raw = "".join(block_lines)
+            blocks.append(
+                _Block(text=raw.strip("\n"), span=(line_start, line_start + len(raw.rstrip("\n"))), kind="atomic")
+            )
+            offset = j_offset
+            i = j
+            continue
+
+        if _TABLE_ROW_RE.match(line):
+            # A markdown table: consecutive "| ... |" lines are one atomic block, never
+            # cut mid-row by the word-count splitter or merged into prose.
+            flush_paragraph(line_start)
+            block_lines = [line]
+            j = i + 1
+            j_offset = line_end
+            while j < n and _TABLE_ROW_RE.match(lines[j]):
+                block_lines.append(lines[j])
+                j_offset += len(lines[j])
                 j += 1
             raw = "".join(block_lines)
             blocks.append(

@@ -73,3 +73,22 @@ def test_source_spans_are_within_bounds():
     for leaf in leaves:
         start, end = leaf.source_span
         assert 0 <= start <= end <= len(text)
+
+
+def test_a_long_markdown_table_is_one_atomic_leaf_never_cut_mid_row():
+    header = "| Name | Type | Default | Notes |\n|------|------|---------|-------|\n"
+    rows = "".join(f"| option{i} | int | {i} | the {i}th option controls behaviour number {i} in the system |\n" for i in range(40))
+    text = f"# Options\n\n{_words(30)}\n\n{header}{rows}\n{_words(30, 'after')}\n"
+    leaves = chunk(text)
+    tables = [l for l in leaves if l.text.lstrip().startswith("| Name")]
+    assert len(tables) == 1
+    assert tables[0].atomic is True
+    assert tables[0].text.count("\n") == 41  # header, separator and 40 rows, none lost
+    assert all(line.startswith("|") and line.endswith("|") for line in tables[0].text.splitlines())
+    # prose around it is untouched and not merged into the table
+    assert any(l.text.startswith("word0") for l in leaves) and any(l.text.startswith("after0") for l in leaves)
+
+
+def test_pipes_inside_prose_do_not_make_a_table():
+    text = f"# A\n\n{_words(60)} a | b | c inline pipes are fine {_words(30, 'x')}\n"
+    assert not any(l.atomic for l in chunk(text))
