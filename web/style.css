@@ -1435,7 +1435,8 @@ button.source-link:focus-visible .source-link-more {
 
 /* Old trees with no `sections` field: hide nav/rail, go single column. */
 #app.no-sections.active {
-  grid-template-columns: 1fr;
+  /* minmax(0, ...): a bare 1fr lets the header's min-content widen the page on a phone. */
+  grid-template-columns: minmax(0, 1fr);
 }
 #app.no-sections #section-nav,
 #app.no-sections #rail {
