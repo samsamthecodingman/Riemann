@@ -4,7 +4,7 @@ The approved plan (`research/reports/00-plan.md`), amended by Sam's decisions of
 
 ## Scope
 **In v1:**
-- Paste text, upload a file (.md/.txt/.pdf) or give a URL. Riemann builds an **adaptive-depth abstraction tree**, and a local web page shows it with a **continuous zoom dial**.
+- Paste text, upload a file (.md/.txt/.pdf/.docx) or give a URL. Riemann builds an **adaptive-depth abstraction tree**, and a local web page shows it with a **continuous zoom dial**.
 - A local **event log**.
 - A **resume** feature: reopen where Sam left off.
 
@@ -26,7 +26,7 @@ riemann/
   riemann/abstraction/chunk.py   # markdown → leaves (atomic code/procedure/equation blocks)
   riemann/abstraction/summarise.py  # Summariser protocol; ClaudeSummariser; FakeSummariser
   riemann/abstraction/build.py   # adaptive-depth bottom-up build + provisional root; emits events
-  riemann/abstraction/cache.py   # ~/.cache/riemann/trees/<sha256>.json
+  riemann/abstraction/cache.py   # ~/.cache/riemann/trees/<build version>/<id>.json (older version dirs are read-only fallbacks; ids are plain tokens, never paths)
   riemann/events.py              # append-only event log ~/.local/share/riemann/events.jsonl
   riemann/server.py              # FastAPI app; serves web/ at /
   web/index.html  web/app.js  web/style.css
@@ -106,10 +106,12 @@ class Tree(BaseModel):
 ## API (server.py)
 | Method | Path | Body / query | Returns |
 |---|---|---|---|
-| POST | `/api/abstract` | JSON `{"text"}` or `{"url"}`, or multipart `file` | `{"tree_id", "cached": bool}` (starts the build in the background if not cached) |
+| POST | `/api/abstract` | JSON `{"text"}` or `{"url"}` (`Content-Type: application/json` required), or multipart `file`; optional `model`, `objective` | `{"tree_id", "cached": bool}` (starts the build in the background if not cached; a failed build is dropped and retried by the next identical request). Errors: 400 (empty, wrong types, blocked or unfetchable link, over 50,000 words, unreadable file), 413 (body too large), 415 (wrong content type), 411 (upload without a length), 403 (non-local Host or cross-site Origin) |
 | GET | `/api/tree/{id}` | — | the Tree JSON (whatever exists so far) |
 | GET | `/api/tree/{id}/events` | — | SSE: `leaves`, `provisional_root`, `level`, `done`, `error`; data = JSON (nodes added/updated). If the build is already done, send one `done` with the full tree and close |
-| POST | `/api/events` | JSON array of UI events | 204. Appended to the event log with a server timestamp |
+| POST | `/api/events` | JSON array of event objects (max 1 MB) | 204. Appended to the event log with a server timestamp; 400 for anything that is not an array of objects |
+| POST | `/api/tree/{id}/overview`, `/api/tree/{id}/short-titles` | — | Backfill the overview card, or the map's short titles, for a tree built before they existed (one model call, once per tree). See `docs/overview-spec.md` |
+| GET | `/api/models` | — | `{default, models[]}` from the proxy (filtered) |
 | GET | `/api/recent` | — | the last 20 trees (id, title, words, updated) for the start screen |
 | GET | `/` | — | web/index.html |
 

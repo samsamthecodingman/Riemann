@@ -83,7 +83,8 @@ A CSS grid: `300px | minmax(0,1fr) | 380px` columns and a `72px | 1fr` row. The 
   2. **Steps** card, if `steps`: "HOW IT WORKS", with chips on `--sec-(n+1)` and the last chip on the current section hue in weight 600. Otherwise show **KEY POINTS** (bullets) if present.
   3. **UP NEXT · NN**: the next section's title (Fraunces 21) and hook. Clicking jumps there.
   - The rail cards crossfade (180 ms) when the current section changes, with an instant fallback under reduced motion.
-- **Minimal chrome (`m`):** hides the nav and rail; the middle goes full width (the 2-column grid stays, capped at 1200 px).
+- **Minimal chrome (`m`):** hides the header, nav, map, rail and column handles (faded, then `visibility: hidden` so they leave the Tab order, and with zero padding so they cannot widen the page); the middle goes full width (capped at 1200 px). The small diamond, bottom right, and `m` bring the chrome back.
+- **Reading width:** two columns need room. When the reading area is under 560 px (a container query on `#content`) the section grid falls back to one column; at 1366x768 it stays two.
 - **Breadcrumb:** unnecessary now (the nav shows position), so remove it.
 - **Tablet and phone (< 1100 px):** single column. The nav becomes a horizontally scrollable pill row under the header. The rail cards move below each section header. The header's two-line block becomes one line. It must work at 390 px with a 16 px gutter.
 - **Start screen and "gist coming…":** restyle in Macaron (cream, Fraunces heading, panel cards, ink primary button). The recent list stays as plain links.

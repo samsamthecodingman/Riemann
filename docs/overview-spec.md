@@ -19,6 +19,15 @@ files (including PDFs) and fetched URLs. The tree id is a hash of the repaired t
   items stay `1. `; a list is always its own block (blank line before and after).
 - Well-formed prose and markdown are unchanged. The function is idempotent.
 
+Later additions to the repair step (all deterministic, in `ingest.py` and `normalise.py`):
+
+- **Word files:** `.docx` is read with the standard library (zip and XML): headings, list items, paragraphs and table rows, in order. The inflated size of `word/document.xml` is capped at 40 MB before it is read.
+- **PDF:** lines that repeat at the top or bottom of at least half the pages (running titles, "Page 3 of 12", bare page numbers), digits blanked, are dropped; the first page's top lines (the title) are kept. PDF and Word failures come back as a 400 with a plain message.
+- **Numbered headings** on their own line followed by prose ("2. Method", "2.1 Data") become markdown headings (`##`, `###`), so the chunker keeps the report's sections. A real numbered list stays a list.
+- Ligatures (fi, fl, ff, ffi, ffl) are expanded.
+- **Links:** `https://` is added when missing, layout tables that wrap a whole article are unwrapped, and "¶" permalinks are dropped from headings and titles. The link must be http or https and every address it resolves to (and every redirect hop) must be public.
+- **Chunking:** a markdown table is one atomic leaf (like a code fence).
+
 Rendering: prose and source leaves go through `renderMarkdown` in `web/app.js` (marked, or a built-in
 fallback if the CDN script did not load), then a tag/attribute allow-list sanitiser; raw HTML in the source is
 shown as text. Key points and essentials use `renderInline` (escaped, then `**bold**`, `*italic*`, `` `code` ``).

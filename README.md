@@ -31,7 +31,7 @@ Zoom in and the section you're pointing at unfolds into titled sub-points, then 
 | Mouse | Hold **Z** and move the mouse left or right over a passage |
 | Trackpad | Tap **Z**, then scroll or swipe with two fingers (tap Z again, press Esc or pause to stop) |
 | Pinch | Pinch on the trackpad (or Ctrl + scroll wheel) |
-| Keyboard | **=** / **−** step the whole page; **Home** / **End** jump to the gist or the full text |
+| Keyboard | **=** / **−** step the whole page. With the zoom control focused (Tab to it), **Home** / **End** jump to the gist or the full text and the arrow keys step |
 | Buttons | **− Less** / **More +** in the header |
 
 The header always shows roughly how long the current view takes to read and what share of the original it covers.
@@ -67,10 +67,13 @@ A folding panel on the home page asks about energy, mood, sleep, caffeine and me
 
 ### Other details
 
+- **Overview card:** above section 01, at every zoom level, a card says what the document is: its own title, a one-sentence description and a few key facts chosen for that kind of document and your goal (for a brief: what to hand in, when it is due, how it is weighted, how to submit, what it is assessed on). Values are short and shown in full, and each has a `¶` link to the passage it came from. Anything the source doesn't say reads "not stated". Documents built before this existed get a card the first time you open them.
+- **Files and links:** paste text, upload a `.md`, `.txt`, `.pdf` or `.docx` file, or give a link. PDF headers, footers and page numbers are removed, numbered headings become sections, and Word headings, lists and tables are kept. A link without `https://` gets it added.
+- **Minimal chrome:** press **M** to hide the header, section list and side rail and read the text alone. Press **M** again (or the small diamond, bottom right) to bring them back.
 - **Palette:** swap the pastel section colours. The Palette panel closes when you click away.
 - **Key facts and Up next:** the right-hand rail pulls out a key number and previews the next section.
 - **Models:** choose the summarising model from the home page. The default is Claude Sonnet 5.5.
-- **Local only:** trees and the reading-event log live on your machine, under `~/.local/share/riemann/` by default. Nothing is sent anywhere except the model calls themselves.
+- **Local only:** built trees are cached under `~/.cache/riemann/` and the reading-event log is `~/.local/share/riemann/events.jsonl` (both move under `RIEMANN_DATA_DIR` if you set it). Nothing is sent anywhere except the model calls themselves. The server listens on `127.0.0.1` only, and refuses requests that don't come from your own browser (see Security).
 - **Accessibility:** it respects reduced motion, all interactive parts are buttons with labels, and it has a full-screen map sheet on phones.
 
 ## Setup
@@ -132,7 +135,19 @@ Other settings:
 | Variable | Default | Purpose |
 |---|---|---|
 | `RIEMANN_MODEL` | `claude-sonnet-5-5` | Default summarising model |
-| `RIEMANN_DATA_DIR` | `~/.local/share/riemann` | Tree cache and event log |
+| `RIEMANN_DATA_DIR` | cache `~/.cache/riemann`, log `~/.local/share/riemann` | When set, the tree cache (`cache/`) and the event log (`share/`) both go under this folder |
+| `RIEMANN_ALLOW_PRIVATE_URLS` | unset | Set to `1` to let the **Link** tab fetch `localhost` or private-network addresses (blocked by default) |
+| `RIEMANN_ALLOWED_HOSTS` | unset | Extra `Host` names the server will answer to, comma separated (only `localhost`, `127.0.0.1` and `::1` by default) |
+
+### Limits
+
+- A document may be at most **50,000 words** (about 200 pages); paste a chapter at a time for anything bigger.
+- Uploads may be up to 30 MB, pasted text up to 5 MB, a fetched web page up to 15 MB, and a Word file's text up to 40 MB once unpacked.
+- Chinese and Japanese text is not supported yet (words are counted by spaces). Maths in `$...$` shows as source text.
+
+### Security
+
+Riemann is a personal app that spends your model quota and reads your disk, so the server is strict about who can talk to it. It binds to `127.0.0.1`. Requests with a `Host` header that isn't local, or a state-changing request from another website's `Origin`, get a 403, so a page open in another tab can't drive it. JSON endpoints require `Content-Type: application/json`. The **Link** tab refuses non-web schemes and any address that resolves to a loopback, private or link-local machine (including after redirects), so a pasted link can't make Riemann fetch your local services. Tree ids are never used as file paths, and Word files are size-checked before they are unpacked.
 
 ### Tests
 
@@ -174,8 +189,8 @@ zoom dial z ∈ [0,1] → frontier (what's shown, and in which form)
   - `map.js` and `maplayout.js`: the map, an ordered strip treemap
   - `cols.js`: resizable columns
   - `objective.js`: goal suggestion
-- **Specs**: [`docs/v1-build-spec.md`](docs/v1-build-spec.md), [`docs/v2-macaron-spec.md`](docs/v2-macaron-spec.md) (reader design) and [`docs/spatial-view-spec.md`](docs/spatial-view-spec.md) (the map).
+- **Specs**: [`docs/v1-build-spec.md`](docs/v1-build-spec.md), [`docs/v2-macaron-spec.md`](docs/v2-macaron-spec.md) (reader design), [`docs/overview-spec.md`](docs/overview-spec.md) (the overview card and source-text repair) and [`docs/spatial-view-spec.md`](docs/spatial-view-spec.md) (the map). Review notes and proposals from the overnight QA rounds are in [`docs/overnight-review.md`](docs/overnight-review.md).
 
 ## Status
 
-Riemann is a personal project and still early. Reader, map, goals and check-in are working. Next up: a library map across documents, and better titles for pasted text.
+Riemann is a personal project and still early. Reader, map, overview card, goals and check-in are working. Next up: a library map across documents, and better titles for pasted text.
