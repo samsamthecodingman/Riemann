@@ -11,6 +11,16 @@ import re
 
 import httpx
 
+from riemann.abstraction.normalise import normalise_text
+
+
+def _shorten(line: str, limit: int = 90) -> str:
+    """A title from a long first line: cut at a word boundary."""
+    if len(line) <= limit:
+        return line
+    cut = line[:limit].rsplit(" ", 1)[0].rstrip(" ,;:-–")
+    return cut + "…"
+
 
 def _title_from_text(text: str, fallback: str) -> str:
     for line in text.splitlines():
@@ -19,14 +29,14 @@ def _title_from_text(text: str, fallback: str) -> str:
             continue
         heading = re.match(r"^#{1,6}\s+(.*)", line)
         if heading:
-            return heading.group(1).strip()[:200]
-        return line[:200]
+            return _shorten(heading.group(1).strip(), 200)
+        return _shorten(line)
     return fallback
 
 
 def from_text(text: str, title: str | None = None) -> tuple[str, str]:
     """Plain pasted text/markdown."""
-    text = text.strip()
+    text = normalise_text(text)
     return (title or _title_from_text(text, "Untitled"), text)
 
 
@@ -36,7 +46,7 @@ def from_file(filename: str, content: bytes) -> tuple[str, str]:
     if lower.endswith(".pdf"):
         return _from_pdf(filename, content)
     # .md / .txt / anything else: decode as text
-    text = content.decode("utf-8", errors="replace").strip()
+    text = normalise_text(content.decode("utf-8", errors="replace"))
     title = _title_from_text(text, filename)
     return (title, text)
 
@@ -50,7 +60,7 @@ def _from_pdf(filename: str, content: bytes) -> tuple[str, str]:
         page_text = page.extract_text() or ""
         if page_text.strip():
             parts.append(page_text.strip())
-    text = "\n\n".join(parts).strip()
+    text = normalise_text("\n\n".join(parts))
     title = _title_from_text(text, filename)
     return (title, text)
 
@@ -79,4 +89,4 @@ async def from_url(url: str) -> tuple[str, str]:
     title = (metadata.title if metadata and metadata.title else None) or _title_from_text(
         extracted, url
     )
-    return (title, extracted.strip())
+    return (title, normalise_text(extracted))

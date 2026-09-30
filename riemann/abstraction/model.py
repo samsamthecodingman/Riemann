@@ -23,6 +23,28 @@ class KeyFact(BaseModel):
     cites: list[str] = Field(default_factory=list)
 
 
+class Essential(BaseModel):
+    """One label/value line of a document's overview card (e.g. "Due" /
+    "Friday 5 pm"). Every number in `value` must appear in the cited leaves."""
+
+    label: str
+    value: str
+    cites: list[str] = Field(default_factory=list)
+
+
+class Overview(BaseModel):
+    """The "what is this" card shown above section 01 at every zoom level:
+    what kind of document it is, its real title, one plain sentence, and the
+    few things the reader most needs (chosen by their goal and the kind of
+    document). Built once by build.generate_overview, or backfilled for older
+    trees; optional so trees cached before it existed still load."""
+
+    doc_title: str
+    doc_kind: str
+    what_it_is: str
+    essentials: list[Essential] = Field(default_factory=list)
+
+
 class Node(BaseModel):
     """One node in the abstraction tree.
 
@@ -76,3 +98,6 @@ class Tree(BaseModel):
     """Node ids at the section level: the first depth from the root with
     >=2 nodes. Empty for a single-leaf tree or a tree that never branches
     (a straight chain from root to one leaf). See build.compute_sections."""
+    overview: Overview | None = None
+    """"What is this" card (see Overview); None for trees built before it
+    existed, until the backfill endpoint adds it."""

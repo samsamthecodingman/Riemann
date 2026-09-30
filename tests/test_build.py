@@ -326,3 +326,103 @@ def test_old_schema_json_still_loads():
     assert node.key_points == []
     assert node.key_fact is None
     assert node.steps == []
+
+
+# --- single-child chains ---------------------------------------------------
+
+
+def test_collapse_single_child_chain_keeps_root_summary():
+    from riemann.abstraction.build import collapse_single_child_chains
+
+    # root -> d1 -> d2 -> (s1, s2 -> leaf only)
+    nodes = {
+        "root": _mk_node("root", 0, children=["d1"]),
+        "d1": _mk_node("d1", 1, children=["d2"]),
+        "d2": _mk_node("d2", 2, children=["s1", "s2"]),
+        "s1": _mk_node("s1", 3, children=["l1", "l2"]),
+        "s2": _mk_node("s2", 3, children=["l3"]),
+        "l1": _mk_node("l1", 4, is_leaf=True),
+        "l2": _mk_node("l2", 4, is_leaf=True),
+        "l3": _mk_node("l3", 4, is_leaf=True),
+    }
+    for nid, n in nodes.items():
+        n.parent = None
+    for nid, n in nodes.items():
+        for c in n.children:
+            nodes[c].parent = nid
+    nodes["root"].text = "the root summary"
+    collapse_single_child_chains(nodes, "root")
+    assert nodes["root"].children == ["s1", "l3"]  # s2 (one leaf child) is replaced by the leaf
+    assert nodes["root"].text == "the root summary"
+    assert set(nodes) == {"root", "s1", "l1", "l2", "l3"}
+    assert nodes["l3"].parent == "root" and nodes["s1"].parent == "root"
+
+
+@pytest.mark.parametrize("words", [400, 1500, 6000, 20000])
+async def test_no_single_child_chains_and_sections_split(words):
+    tree = await _build(_doc(words), tree_id=f"chain-{words}")
+    for n in tree.nodes.values():
+        if not n.is_leaf:
+            assert len(n.children) >= 2, f"{n.id} has {len(n.children)} child(ren)"
+    assert len(tree.sections) >= 2
+    assert set(tree.sections) == set(tree.nodes[tree.root].children)
+
+
+# --- overview ------------------------------------------------------------------
+
+
+async def test_overview_built_and_validated_with_fake_summariser():
+    tree = await _build(_doc(1500), tree_id="overview-fake")
+    ov = tree.overview
+    assert ov is not None
+    assert ov.doc_title == "Title" and ov.doc_kind and ov.what_it_is.startswith("This is")
+    assert 3 <= len(ov.essentials) <= 7
+    leaf_ids = {i for i, n in tree.nodes.items() if n.is_leaf}
+    for e in ov.essentials:
+        assert e.label and e.value and set(e.cites) <= leaf_ids
+
+
+async def test_overview_uses_goal_specific_essentials():
+    builder = start_build("overview-exec", "Brief", _doc(1500), FakeSummariser(), objective="execute")
+    await builder.task
+    ov = builder.tree.overview
+    assert [e.label for e in ov.essentials] == ["Deliverables", "Due", "What you need to do"]
+    assert ov.doc_kind == "Assignment brief"
+
+
+def _overview_tree():
+    leaf1 = _mk_node("l1", 1, is_leaf=True)
+    leaf1.text = "Due Friday 5 pm. The report is worth 25% of the unit."
+    leaf2 = _mk_node("l2", 1, is_leaf=True)
+    leaf2.text = "Nothing else."
+    root = _mk_node("root", 0, children=["l1", "l2"])
+    t = _mk_tree({"root": root, "l1": leaf1, "l2": leaf2}, "root")
+    t.source_text = leaf1.text + "\n\n" + leaf2.text
+    return t
+
+
+def test_overview_drops_bad_items_and_invented_numbers():
+    from riemann.abstraction.build import _clean_overview
+
+    tree = _overview_tree()
+    raw = {
+        "doc_title": "ABC101 Report brief",
+        "doc_kind": "Assignment brief",
+        "what_it_is": "This is the brief for a report worth 99% of the unit.",  # 99 not in the source
+        "essentials": [
+            {"label": "Due", "value": "Friday 5 pm", "cites": ["l1"]},
+            {"label": "Weight", "value": "25% of the unit", "cites": ["l1"]},
+            {"label": "Pages", "value": "10 pages", "cites": ["l2"]},  # 10 not in cited leaf
+            {"label": "Submit how", "value": "not stated", "cites": []},
+            {"label": "Due", "value": "again", "cites": ["l1"]},  # duplicate label
+            {"label": "Bogus cite", "value": "Friday", "cites": ["nope"]},
+            {"label": "", "value": "no label"},
+            "not a dict",
+        ],
+    }
+    ov = _clean_overview(raw, tree)
+    assert ov.what_it_is == "This is an assignment brief."
+    assert [e.label for e in ov.essentials] == ["Due", "Weight", "Submit how", "Bogus cite"]
+    assert ov.essentials[3].cites == []  # unknown leaf ids are dropped
+    assert _clean_overview({"doc_title": "", "doc_kind": "x"}, tree) is None
+    assert _clean_overview("nope", tree) is None

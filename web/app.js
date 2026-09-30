@@ -325,15 +325,15 @@
     }
     const P = window.Frontier.PROSE;
     const keep = new Set();
+    const onPage = new Set(state.frontier);
     for (const id of state.frontier) {
       let p = nodes[id] && nodes[id].parent;
       while (p && !keep.has(p)) {
         keep.add(p);
-        if (p !== state.tree.root) keep.add(P + p);
         p = nodes[p].parent;
       }
     }
-    for (const id of state.prose) keep.add(P + id);
+    for (const id of state.prose) if (onPage.has(id) && id !== state.tree.root) keep.add(P + id);
     const seq = window.Frontier.buildExpansionSequence(state.tree, anchorId, keep);
     if (seq.length) state.z = keep.size / seq.length;
     return seq;
@@ -573,9 +573,9 @@
     let html;
     if (skim) {
       const points = node.key_points && node.key_points.length ? node.key_points : [node.hook];
-      html = `<ul class="skim-points">${points.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul>`;
+      html = `<ul class="skim-points">${points.map((p) => `<li>${renderInline(p)}</li>`).join("")}</ul>`;
     } else {
-      html = window.marked ? window.marked.parse(node.text || "") : `<p>${escapeHtml(node.text || "")}</p>`;
+      html = renderMarkdown(node.text || "");
     }
     const isLeaf = node.is_leaf;
     const cls = ["node", isLeaf ? "leaf" : "summary", skim ? "skim" : "", node.atomic ? "atomic" : "", opts.sectionSelf ? "section-self" : ""]
@@ -599,6 +599,109 @@
 
   function escapeHtml(s) {
     return (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  // Inline markdown for short strings (key points, essentials): everything
+  // escaped first, then only **bold**, *italic* and `code` are turned into tags.
+  function renderInline(s) {
+    return escapeHtml(s || "")
+      .replace(/\*\*([^*\n]+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[^*\w])\*([^*\s][^*\n]*?)\*(?!\w)/g, "$1<em>$2</em>")
+      .replace(/`([^`\n]+?)`/g, "<code>$1</code>");
+  }
+
+  // Block markdown for prose and source leaves. marked does the parsing when
+  // it loaded (it is a CDN script); a small built-in renderer covers paragraphs,
+  // lists, headings, bold/italic/code when it did not. Either way the result
+  // is sanitised: only a short list of harmless tags survives, raw HTML in the
+  // source is shown as text, and links are limited to http(s)/mailto.
+  const SAFE_TAGS = new Set(["P", "UL", "OL", "LI", "STRONG", "EM", "B", "I", "CODE", "PRE", "BR", "HR", "BLOCKQUOTE", "A",
+    "H1", "H2", "H3", "H4", "H5", "H6", "TABLE", "THEAD", "TBODY", "TR", "TH", "TD", "DEL", "SUB", "SUP"]);
+
+  function miniMarkdown(src) {
+    const lines = String(src).replace(/\r\n?/g, "\n").split("\n");
+    const out = [];
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      if (!line.trim()) {
+        i++;
+        continue;
+      }
+      const h = line.match(/^(#{1,6})\s+(.*)$/);
+      if (h) {
+        out.push(`<h${h[1].length}>${renderInline(h[2])}</h${h[1].length}>`);
+        i++;
+        continue;
+      }
+      const ul = /^\s*[-*+]\s+/;
+      const ol = /^\s*\d{1,3}[.)]\s+/;
+      if (ul.test(line) || ol.test(line)) {
+        const re = ul.test(line) ? ul : ol;
+        const tag = re === ul ? "ul" : "ol";
+        const items = [];
+        while (i < lines.length && re.test(lines[i])) {
+          items.push(`<li>${renderInline(lines[i].replace(re, ""))}</li>`);
+          i++;
+        }
+        out.push(`<${tag}>${items.join("")}</${tag}>`);
+        continue;
+      }
+      const para = [];
+      while (i < lines.length && lines[i].trim() && !/^#{1,6}\s/.test(lines[i]) && !ul.test(lines[i]) && !ol.test(lines[i])) {
+        para.push(lines[i].trim());
+        i++;
+      }
+      out.push(`<p>${renderInline(para.join(" "))}</p>`);
+    }
+    return out.join("");
+  }
+
+  function sanitizeHTML(html) {
+    const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
+    const walk = (parent) => {
+      for (const child of Array.from(parent.childNodes)) {
+        if (child.nodeType === 3) continue;
+        if (child.nodeType !== 1) {
+          child.remove();
+          continue;
+        }
+        if (!SAFE_TAGS.has(child.tagName)) {
+          child.replaceWith(document.createTextNode(child.textContent || ""));
+          continue;
+        }
+        for (const attr of Array.from(child.attributes)) {
+          const keep = child.tagName === "A" && attr.name === "href" && /^(https?:|mailto:|#)/i.test(attr.value.trim());
+          if (!keep) child.removeAttribute(attr.name);
+        }
+        if (child.tagName === "A") {
+          child.setAttribute("target", "_blank");
+          child.setAttribute("rel", "noopener noreferrer");
+        }
+        walk(child);
+      }
+    };
+    walk(doc.body);
+    return doc.body.innerHTML;
+  }
+
+  function renderMarkdown(text) {
+    let html = null;
+    if (window.marked && typeof window.marked.parse === "function") {
+      try {
+        // Raw HTML in the source is escaped, not passed through.
+        html = window.marked.parse(escapeRawHtml(text || ""), { gfm: true, breaks: false });
+      } catch (e) {
+        html = null;
+      }
+    }
+    if (html == null) html = miniMarkdown(text || "");
+    return sanitizeHTML(html);
+  }
+
+  function escapeRawHtml(src) {
+    // Only the tag-open character: markdown syntax (>, &, quotes) is untouched.
+    return String(src).replace(/<(?=[A-Za-z\/!?])/g, "&lt;");
   }
 
   function groupFrontierBySections(tree, frontier) {
@@ -639,17 +742,61 @@
     </div>`;
   }
 
+  // Provenance label for a list of leaf ids: "¶ 3" or "¶ 3–5".
+  function citesProvenance(cites) {
+    const li = state.leafIndex;
+    if (!li) return "";
+    const idxs = (cites || []).map((id) => li[id]).filter((x) => x != null);
+    if (!idxs.length) return "";
+    const mn = Math.min(...idxs);
+    const mx = Math.max(...idxs);
+    return mn === mx ? `¶ ${mn}` : `¶ ${mn}–${mx}`;
+  }
+
+  // The "what is this" card above section 01, shown at every zoom level:
+  // kind pill, the document's own title, one plain sentence, and the few
+  // essentials as a compact label/value grid (each with a ¶ link to the
+  // source). Not a [data-node-id] block, so zoom anchoring ignores it.
+  function overviewHTML() {
+    const tree = state.tree;
+    const ov = tree && tree.overview;
+    if (!ov || !ov.doc_title) return "";
+    const items = (ov.essentials || [])
+      .map((e, i) => {
+        const prov = citesProvenance(e.cites);
+        const provHTML = prov
+          ? `<button type="button" class="provenance source-link" data-leaf="${escapeHtml((e.cites || [])[0] || "")}" title="Read the original text">${escapeHtml(prov)}</button>`
+          : "";
+        const stated = !/^not stated\.?$/i.test((e.value || "").trim());
+        return `<div class="ov-item" style="--sec-n: var(--sec-${(i % 5) + 1})" title="Click to show or hide the full text">
+          <dt><span>${escapeHtml(e.label)}</span>${provHTML}</dt>
+          <dd class="${stated ? "" : "ov-unstated"}"><span>${renderInline(e.value)}</span></dd>
+        </div>`;
+      })
+      .join("");
+    return `<section class="overview-card" aria-label="What this document is">
+      <span class="ov-kind">${escapeHtml(ov.doc_kind || "")}</span>
+      <h1 class="ov-title">${escapeHtml(ov.doc_title)}</h1>
+      ${ov.what_it_is ? `<p class="ov-what">${renderInline(ov.what_it_is)}</p>` : ""}
+      ${items ? `<dl class="ov-essentials">${items}</dl>` : ""}
+    </section>`;
+  }
+
   function contentHTML() {
     const tree = state.tree;
     const frontier = state.frontier;
+    const overview = overviewHTML();
     if (frontier.length === 1 && frontier[0] === tree.root) {
       const root = tree.nodes[tree.root];
-      return `<div class="root-hero"><h1>${escapeHtml(nodeTitle(root) || tree.title || "")}</h1><p>${escapeHtml(
+      const heading = overview
+        ? `<span class="hero-kicker">THE GIST</span>`
+        : `<h1>${escapeHtml(nodeTitle(root) || tree.title || "")}</h1>`;
+      return `${overview}<div class="root-hero${overview ? " has-overview" : ""}">${heading}<p>${escapeHtml(
         root.hook || root.text || ""
       )}</p></div>`;
     }
     const groups = groupFrontierBySections(tree, frontier);
-    return groups.map((g) => renderSectionGroupHTML(tree, g)).join("");
+    return overview + groups.map((g) => renderSectionGroupHTML(tree, g)).join("");
   }
 
   // Natural (pre-transform) rects from the most recent render, keyed by
@@ -798,7 +945,7 @@
   function updateHeader() {
     const tree = state.tree;
     const root = tree.nodes[tree.root];
-    $docTitle.textContent = (tree.title || "").toUpperCase();
+    $docTitle.textContent = ((tree.overview && tree.overview.doc_title) || tree.title || "").toUpperCase();
     const $obj = el("doc-objective");
     const objLabel = objectiveLabel(tree.objective);
     $obj.hidden = !objLabel;
@@ -993,7 +1140,15 @@
       return;
     }
     const link = e.target.closest(".source-link");
-    if (!link) return;
+    if (!link) {
+      const tile = e.target.closest(".ov-item");
+      if (tile) tile.classList.toggle("open");
+      return;
+    }
+    if (link.dataset.leaf) {
+      if (state.tree.nodes[link.dataset.leaf]) jumpToLeaf(link.dataset.leaf);
+      return;
+    }
     const nodeEl = link.closest("[data-node-id]");
     const node = state.tree.nodes[nodeEl.dataset.nodeId];
     if (!node || !node.cites || node.cites.length === 0) return;
@@ -1630,11 +1785,7 @@
     setAnchor(nodeId);
 
     const total = Math.max(1, state.sequence.length);
-    let neededK = 0;
-    for (let p = tree.nodes[nodeId].parent; p; p = tree.nodes[p].parent) {
-      const idx = state.sequence.indexOf(p);
-      if (idx >= 0) neededK = Math.max(neededK, idx + 1);
-    }
+    const neededK = window.Frontier.kToReveal(tree, state.sequence, nodeId);
     if (neededK > window.Frontier.zToK(state.z, total)) setZ(neededK / total, "jump");
 
     const isSection = sectionsOf(tree).includes(nodeId);
@@ -1727,6 +1878,26 @@
     logEvent("checkin_adjust_undo", { tree_id: state.tree.id });
   });
 
+  // Trees built before the overview card existed get it from one call
+  // (POST /api/tree/{id}/overview), once per tree per session; failures are
+  // silent and the reader simply has no card. The card lands above the
+  // content, so the page is re-rendered with the reading position held.
+  const overviewTried = new Set();
+  function ensureOverview(tree) {
+    if (tree.overview || tree.status !== "done" || overviewTried.has(tree.id)) return;
+    const rootNode = tree.nodes[tree.root];
+    if (!rootNode || rootNode.is_leaf) return;
+    overviewTried.add(tree.id);
+    fetch(`/api/tree/${encodeURIComponent(tree.id)}/overview`, { method: "POST" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data || !data.overview || !state.tree || state.tree.id !== tree.id) return;
+        tree.overview = data.overview;
+        keepReadingPosition(() => render({}));
+      })
+      .catch(() => {});
+  }
+
   function openTree(tree, opts) {
     resetTopSpacer();
     opts = opts || {};
@@ -1781,6 +1952,7 @@
 
     logEvent("open", { tree_id: tree.id, resumed: !!saved });
     flushEvents(false);
+    ensureOverview(tree);
 
     if (saved) showResumeCard(anchorId);
     maybeShowHint();

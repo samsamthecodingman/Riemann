@@ -1195,6 +1195,153 @@ button.source-link:focus-visible .source-link-more {
   max-width: 60ch;
 }
 
+.root-hero.has-overview {
+  padding-top: 18px;
+}
+
+.hero-kicker {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--label);
+}
+
+.root-hero.has-overview p {
+  margin-top: 6px;
+  font-family: var(--display);
+  font-size: 24px;
+  line-height: 1.35;
+  color: var(--text);
+  max-width: 44ch;
+}
+
+/* Overview card: "what is this" above section 01 at every zoom level.
+   Compact by design (fits a 1366x768 laptop with section 01 still in view);
+   the essentials reuse the key-fact card's pastel tiles and the pill. */
+.overview-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px 14px;
+  margin-bottom: 22px;
+}
+
+.ov-kind {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: var(--pill);
+  background: var(--sec-3);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ov-title {
+  margin: 6px 0 0;
+  font-family: var(--display);
+  font-size: 24px;
+  line-height: 1.15;
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.ov-what {
+  margin: 6px 0 0;
+  font-size: 14.5px;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 68ch;
+}
+
+.ov-essentials {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 10px 0 0;
+}
+
+.ov-item {
+  background: color-mix(in srgb, var(--sec-n, var(--sec-3)) 60%, var(--panel));
+  border-radius: var(--radius-sm);
+  padding: 5px 10px 6px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.ov-item dt {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fact-label);
+}
+
+.ov-item dd {
+  margin: 1px 0 0;
+  font-size: 13px;
+  line-height: 1.38;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+/* Long values are clamped to two lines; a click on the tile shows the rest. */
+.ov-item dd > span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.ov-item.open dd > span {
+  display: inline;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+
+.ov-item dd.ov-unstated span {
+  color: var(--fact-sub);
+  font-style: italic;
+}
+
+.ov-item .provenance {
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 500;
+}
+
+@media (max-width: 720px) {
+  .ov-title {
+    font-size: 21px;
+  }
+  .ov-essentials {
+    grid-template-columns: 1fr;
+  }
+}
+
+.node-body ul,
+.node-body ol {
+  margin: 0 0 0.7em;
+  padding-left: 1.3em;
+}
+
+.node-body li {
+  margin: 0.15em 0;
+}
+
+.node-body ul:last-child,
+.node-body ol:last-child {
+  margin-bottom: 0;
+}
+
 /* Zoom transitions (see render() in app.js). None of these may change
    layout: opacity, filter and box-shadow only. */
 .node.fade-enter {

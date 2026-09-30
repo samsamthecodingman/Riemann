@@ -49,11 +49,24 @@ process.stdout.write(JSON.stringify(out));
 """
 
 
+def _keep_for(tree, frontier, prose):
+    """The keep set web/app.js builds for a page: every expanded ancestor of
+    the frontier, plus "~id" for each internal passage shown as prose."""
+    keep = set()
+    on_page = set(frontier)
+    for nid in frontier:
+        p = tree.nodes[nid].parent
+        while p is not None and p not in keep:
+            keep.add(p)
+            p = tree.nodes[p].parent
+    keep |= {"~" + n for n in prose if n in on_page and n != tree.root and not tree.nodes[n].is_leaf}
+    return keep
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 def test_reanchoring_keeps_the_current_page_and_matches_js():
-    """Re-anchoring mid-zoom must not reshuffle the page: with the steps
-    applied so far kept first, the page (frontier and which passages are
-    prose) is unchanged, and one step either way changes one passage. And
+    """Re-anchoring mid-zoom must not reshuffle the page: with the page's
+    applied tokens kept first, the page is unchanged at k == len(keep), and
     JS must agree with Python."""
     from riemann.abstraction.frontier import frontier_at, prose_at
 
@@ -62,21 +75,15 @@ def test_reanchoring_keeps_the_current_page_and_matches_js():
     cases = []
     for old_anchor in ids[::3]:
         old_seq = expansion_sequence(tree, old_anchor)
-        for k in range(0, len(old_seq) + 1, 3):
-            keep = set(old_seq[:k])
-            page = (frontier_at(tree, old_seq, k), prose_at(old_seq, k))
+        for k in range(0, len(old_seq) + 1):
+            frontier = frontier_at(tree, old_seq, k)
+            prose = prose_at(old_seq, k)
+            keep = _keep_for(tree, frontier, prose)
+            on_page = set(frontier)
             for new_anchor in ids[1::4]:
                 seq = expansion_sequence(tree, new_anchor, keep_expanded=keep)
-                assert (frontier_at(tree, seq, k), prose_at(seq, k)) == page
-                for k2 in (k - 1, k + 1):
-                    if 0 <= k2 <= len(seq):
-                        f2, p2 = frontier_at(tree, seq, k2), prose_at(seq, k2)
-                        changed = set(f2) ^ set(page[0])
-                        if changed:
-                            assert p2 == page[1]
-                            assert any(changed == {n} | set(tree.nodes[n].children) for n in changed)
-                        else:
-                            assert len(p2 ^ page[1]) == 1
+                assert frontier_at(tree, seq, len(keep)) == frontier
+                assert {n for n in prose_at(seq, len(keep)) if n in on_page} == {n for n in prose if n in on_page}
                 cases.append((new_anchor, sorted(keep), seq))
 
     js = json.loads(subprocess.run(
@@ -86,3 +93,21 @@ def test_reanchoring_keeps_the_current_page_and_matches_js():
     ).stdout)
     for (anchor, keep, py_seq), js_seq in zip(cases, js):
         assert js_seq == py_seq, f"order differs for anchor {anchor}"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+@pytest.mark.parametrize("chain", [True, False])
+def test_js_matches_python_on_merged_steps(tmp_path, chain):
+    """The merge rule (single-child chains, steps that add too little) must agree
+    between the two implementations on a tree shaped like the one that prompted it."""
+    from tests.test_frontier import _skim_tree
+
+    tree = _skim_tree(chain)
+    path = tmp_path / "tree.json"
+    path.write_text(tree.model_dump_json())
+    js = json.loads(subprocess.run(
+        ["node", "-e", NODE_SCRIPT, str(ROOT / "web" / "frontier.js"), str(path)],
+        capture_output=True, text=True, check=True,
+    ).stdout)
+    for anchor in tree.nodes:
+        assert js[anchor] == expansion_sequence(tree, anchor), f"order differs for anchor {anchor}"

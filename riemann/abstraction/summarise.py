@@ -278,8 +278,39 @@ class FakeSummariser:
     def __init__(self, words: int = 20) -> None:
         self.words = words
 
+    def _overview(self, prompt: str, system: str) -> str:
+        """Deterministic overview: title from the "Document title" line, values
+        are the first alphabetic words of the first shown leaf (so the number
+        validator never trips), cited to that leaf."""
+        title_match = re.search(r"^Document title \(as extracted\): (.*)$", prompt, re.MULTILINE)
+        doc_title = (title_match.group(1).strip() if title_match else "") or "Untitled"
+        leaf_match = _LEAF_IDS_RE.search(prompt)
+        leaf_ids = [x for x in leaf_match.group(1).split(", ") if x] if leaf_match else []
+        first_leaf = re.search(r"^--- leaf (\S+) ---\n(.*?)(?=^--- leaf |\n\nLeaf ids you may cite)", prompt, re.MULTILINE | re.DOTALL)
+        words = [w for w in (first_leaf.group(2).split() if first_leaf else []) if w.isalpha()]
+        goal_match = _GOAL_RE.search(system)
+        goal = goal_match.group(1) if goal_match else None
+        labels = ["Deliverables", "Due", "What you need to do"] if goal == "execute" else ["Main point", "Detail", "Context"]
+        cites = leaf_ids[:1]
+        essentials = [
+            {"label": label, "value": " ".join(words[i * 4 : i * 4 + 4]) or "not stated", "cites": cites}
+            for i, label in enumerate(labels)
+        ]
+        return json.dumps(
+            {
+                "doc_title": doc_title,
+                "doc_kind": "Assignment brief" if goal == "execute" else "Document",
+                "what_it_is": "This is " + " ".join(words[:8]) + ".",
+                "essentials": essentials,
+            }
+        )
+
     async def summarise(self, prompt: str, system: str) -> str:
         combined = system + "\n" + prompt
+
+        # Overview card (build.generate_overview).
+        if "Task: overview" in prompt:
+            return self._overview(prompt, system)
 
         # Short-title backfill (build.backfill_short_titles): {node_id: label}.
         short_match = _SHORT_IDS_RE.search(prompt)

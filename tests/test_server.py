@@ -200,3 +200,59 @@ async def test_short_titles_backfill_unknown_tree_is_404():
     async with await _client() as client:
         resp = await client.post("/api/tree/doesnotexist/short-titles")
         assert resp.status_code == 404
+
+
+async def test_overview_backfill_builds_once_and_persists():
+    async with await _client() as client:
+        resp = await client.post("/api/abstract", json={"text": "# Doc\n\n" + "word " * 1500})
+        tree_id = resp.json()["tree_id"]
+        await _wait_for_done(tree_id)
+        build.BUILDS.clear()
+
+        tree = cache.load_tree(tree_id)
+        assert tree.overview is not None
+        tree.overview = None
+        cache.save_tree(tree)
+
+        resp = await client.post(f"/api/tree/{tree_id}/overview")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["added"] is True and body["overview"]["doc_title"]
+        assert cache.load_tree(tree_id).overview is not None
+
+        again = await client.post(f"/api/tree/{tree_id}/overview")
+        assert again.json()["added"] is False
+        assert again.json()["overview"] == body["overview"]
+
+
+async def test_overview_backfill_unknown_tree_is_404():
+    async with await _client() as client:
+        assert (await client.post("/api/tree/doesnotexist/overview")).status_code == 404
+
+
+async def test_older_cache_namespaces_still_open_and_list(tmp_path):
+    async with await _client() as client:
+        resp = await client.post("/api/abstract", json={"text": "# Doc\n\n" + "word " * 1500})
+        tree_id = resp.json()["tree_id"]
+        await _wait_for_done(tree_id)
+        build.BUILDS.clear()
+
+        # move the tree into an older build-version dir: read-only fallback
+        current = cache.path_for(tree_id)
+        old_dir = current.parent.parent / "r3-leaf120-gist25-stop34-schema3"
+        old_dir.mkdir()
+        current.rename(old_dir / current.name)
+        assert not cache.exists(tree_id)
+        assert cache.load_tree(tree_id) is not None
+        assert (await client.get(f"/api/tree/{tree_id}")).status_code == 200
+        assert tree_id in [t["id"] for t in (await client.get("/api/recent")).json()]
+
+        # the backfill saves into the current namespace and leaves the old copy alone
+        tree = cache.load_tree(tree_id)
+        tree.overview = None
+        (old_dir / current.name).write_text(tree.model_dump_json())
+        before = (old_dir / current.name).read_text()
+        resp = await client.post(f"/api/tree/{tree_id}/overview")
+        assert resp.json()["added"] is True
+        assert (old_dir / current.name).read_text() == before
+        assert cache.exists(tree_id)

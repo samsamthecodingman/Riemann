@@ -14,18 +14,36 @@ from pathlib import Path
 from riemann.abstraction.model import Tree
 
 
-def cache_dir() -> Path:
+def _trees_root() -> Path:
     override = os.environ.get("RIEMANN_DATA_DIR")
     if override:
         base = Path(override) / "cache"
     else:
         base = Path(os.environ.get("XDG_CACHE_HOME", "~/.cache")).expanduser() / "riemann"
-    trees_dir = base / "trees" / build_version()
+    return base / "trees"
+
+
+def cache_dir() -> Path:
+    trees_dir = _trees_root() / build_version()
     trees_dir.mkdir(parents=True, exist_ok=True)
     return trees_dir
 
 
-SCHEMA_VERSION = "schema3"  # bump whenever prompts or node fields change (schema2: v2 macaron fields; schema3: sentence-case titles)
+def legacy_dirs() -> list[Path]:
+    """Older cache namespaces (other build versions, and the flat trees/ dir
+    from before namespacing), newest first. Read-only: trees found there
+    still open, but nothing is ever written to them (a backfilled copy is
+    saved into the current namespace instead)."""
+    root = _trees_root()
+    if not root.is_dir():
+        return []
+    current = build_version()
+    subs = [d for d in root.iterdir() if d.is_dir() and d.name != current]
+    subs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
+    return subs + [root]
+
+
+SCHEMA_VERSION = "schema4"  # bump whenever prompts, chunking/normalisation or node fields change (schema2: v2 macaron fields; schema3: sentence-case titles; schema4: normalised text, no single-child chains, overview card)
 
 
 def build_version() -> str:
@@ -56,9 +74,17 @@ def path_for(tree_id: str) -> Path:
     return cache_dir() / f"{tree_id}.json"
 
 
+def _find(tree_id: str) -> Path | None:
+    for d in [cache_dir(), *legacy_dirs()]:
+        path = d / f"{tree_id}.json"
+        if path.exists():
+            return path
+    return None
+
+
 def load_tree(tree_id: str) -> Tree | None:
-    path = path_for(tree_id)
-    if not path.exists():
+    path = _find(tree_id)
+    if path is None:
         return None
     return Tree.model_validate_json(path.read_text(encoding="utf-8"))
 
@@ -69,23 +95,28 @@ def save_tree(tree: Tree) -> None:
 
 
 def exists(tree_id: str) -> bool:
+    """Whether a tree with this id is cached *under the current build
+    version* (an older-version tree is openable but not a reusable build)."""
     return path_for(tree_id).exists()
 
 
 def recent_trees(limit: int = 20) -> list[dict]:
-    """Last `limit` cached trees (id, title, words, updated), newest first."""
-    trees_dir = cache_dir()
-    entries = []
-    for path in trees_dir.glob("*.json"):
-        try:
-            mtime = path.stat().st_mtime
-        except OSError:
-            continue
-        entries.append((mtime, path))
-    entries.sort(key=lambda e: e[0], reverse=True)
+    """Last `limit` cached trees (id, title, words, updated), newest first,
+    across the current and older cache namespaces (the current one wins for an id)."""
+    entries: dict[str, tuple[float, Path]] = {}
+    for trees_dir in [cache_dir(), *legacy_dirs()]:
+        for path in trees_dir.glob("*.json"):
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            entries.setdefault(path.stem, (mtime, path))
+    ordered = sorted(entries.values(), key=lambda e: e[0], reverse=True)
 
     out = []
-    for mtime, path in entries[:limit]:
+    for mtime, path in ordered:
+        if len(out) >= limit:
+            break
         try:
             tree = Tree.model_validate_json(path.read_text(encoding="utf-8"))
         except Exception:

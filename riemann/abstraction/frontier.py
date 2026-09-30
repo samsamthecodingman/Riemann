@@ -45,6 +45,8 @@ expanded next.
 
 from __future__ import annotations
 
+import re
+
 from riemann.abstraction.model import Tree
 
 
@@ -91,9 +93,85 @@ PROSE = "~"
 (title + key points) to its prose summary. A plain ``"<id>"`` expands it
 into its children."""
 
+GAIN_FRACTION = 0.15
+GAIN_WORDS = 25
+"""The zoom-step rule: every step must add at least min(15% of the words on
+the page, 25 words) of visible text. Steps that don't are merged into the
+next one, so a single step does both (see ``expansion_sequence``)."""
+
 
 def _token_node(token: str) -> str:
     return token[1:] if token.startswith(PROSE) else token
+
+
+def _apply(tree: Tree, expanded: set[str], prose: set[str], token: str) -> None:
+    """Apply one token to a page state. Applying a token for node N also
+    opens every ancestor of N (a token can only be reached through them), which
+    is what lets a merged step drop the tokens it makes redundant."""
+    nid = _token_node(token)
+    p = tree.nodes[nid].parent
+    while p is not None:
+        expanded.add(p)
+        p = tree.nodes[p].parent
+    if token.startswith(PROSE):
+        prose.add(nid)
+    else:
+        expanded.add(nid)
+
+
+def _frontier_of(tree: Tree, expanded: set[str]) -> list[str]:
+    out: list[str] = []
+
+    def visit(nid: str) -> None:
+        if nid in expanded:
+            for c in tree.nodes[nid].children:
+                visit(c)
+        else:
+            out.append(nid)
+
+    visit(tree.root)
+    return out
+
+
+def _count(text: str | None) -> int:
+    return len((text or "").split())
+
+
+def _first_clause(text: str) -> str:
+    m = re.match(r"^[^.!?\n]{1,80}", text or "")
+    return (m.group(0) if m else (text or "")).strip()
+
+
+def _has_skim(node) -> bool:
+    return bool(node.key_points) or bool(node.hook)
+
+
+def _is_skim(tree: Tree, node, prose: set[str]) -> bool:
+    return (not node.is_leaf) and node.id != tree.root and node.id not in prose and _has_skim(node)
+
+
+def _skim_words(node) -> int:
+    points = node.key_points if node.key_points else [node.hook]
+    return _count(node.title or _first_clause(node.text)) + sum(_count(p) for p in points)
+
+
+def visible_words(tree: Tree, frontier: list[str], prose: set[str]) -> int:
+    """Words on the page for a frontier and prose set, as web/app.js renders
+    it: a lone root is its hook line; a skim node is its title plus its key
+    points; anything else is the node's own text."""
+    if len(frontier) == 1 and frontier[0] == tree.root:
+        root = tree.nodes[tree.root]
+        return _count(root.hook or root.text)
+    total = 0
+    for nid in frontier:
+        node = tree.nodes[nid]
+        total += _skim_words(node) if _is_skim(tree, node, prose) else node.words
+    return total
+
+
+def _same_page(tree: Tree, a: tuple[set[str], set[str]], b: tuple[set[str], set[str]]) -> bool:
+    fa, fb = _frontier_of(tree, a[0]), _frontier_of(tree, b[0])
+    return fa == fb and {n for n in a[1] if n in set(fa)} == {n for n in b[1] if n in set(fb)}
 
 
 def expansion_sequence(
@@ -108,58 +186,129 @@ def expansion_sequence(
     dial turns up: **skim** (its title and key points, how it first appears
     when its parent opens), then **prose** (its summary paragraph, token
     ``"~id"``), then **expanded** (replaced by its children, token ``"id"``).
-    So each step either turns one passage's bullets into its paragraph or
-    opens one paragraph into its parts. The root has no skim form (at k=0 it
-    is the hero line) and goes straight to expanded; leaves are verbatim
-    source and have no tokens.
+    The root has no skim form (at k=0 it is the hero line) and goes straight
+    to expanded; leaves are verbatim source and have no tokens.
+
+    **Every step must add visible content.** A candidate step is applied
+    tentatively; unless it adds at least min(15% of the current visible words,
+    25 words) it is not emitted. Instead the *next* step must build on it (a
+    token that, applied alone, reaches the same page as the tentative steps
+    plus itself), and only that later token is emitted, so one step does
+    both. A node with a single child never counts as adding content (not its
+    prose, not its expansion, not a page that newly shows one), so
+    single-child chains are always merged through. If nothing can
+    continue the chain, the tentative step is emitted on its own.
+
+    Because a merged step's token stands for the dropped ones, applying a
+    token for node N also opens every ancestor of N (see ``_apply``);
+    ``frontier_at`` and ``prose_at`` replay that.
 
     anchor_id: node to prioritise steps near. Defaults to the root.
     start_frontier: the frontier to start from. Defaults to ``{tree.root}``.
-    keep_expanded: tokens already applied right now (expanded ids and
-    ``"~id"`` prose tokens). They go first (still topologically valid,
-    nearest-first among themselves), so re-anchoring keeps the page exactly
-    as it is: frontier_at/prose_at(seq, len(keep_expanded)) is the current
-    page, and the next step in either direction changes one passage. Must
-    be closed under prerequisites (any real page's applied set is).
+    keep_expanded: tokens already applied right now (the expanded ids, plus
+    ``"~id"`` for passages currently shown as prose). They go first, one
+    plain step each (never merged), so re-anchoring keeps the page exactly as
+    it is: frontier_at/prose_at(seq, len(keep_expanded)) is the current page.
+    Must be closed under ancestors (any real page's applied set is).
     """
     anchor = anchor_id or tree.root
-    keep = keep_expanded or set()
-    candidates: set[str] = set()
+    keep = set(keep_expanded or ())
+    expanded: set[str] = set()
+    prose: set[str] = set()
     for nid in (set(start_frontier) if start_frontier is not None else {tree.root}):
-        node = tree.nodes[nid]
-        if node.is_leaf:
-            continue
-        candidates.add(nid if nid == tree.root else PROSE + nid)
+        p = tree.nodes[nid].parent
+        while p is not None:
+            expanded.add(p)
+            p = tree.nodes[p].parent
     sequence: list[str] = []
 
-    while candidates:
-        best = min(
-            candidates,
-            key=lambda t: (0 if t in keep else 1,) + _priority_key(tree, _token_node(t), anchor),
-        )
-        candidates.discard(best)
-        sequence.append(best)
-        if best.startswith(PROSE):
-            candidates.add(_token_node(best))
-        else:
-            for child_id in tree.nodes[best].children:
-                if not tree.nodes[child_id].is_leaf:
-                    candidates.add(PROSE + child_id)
+    def key(token: str):
+        return _priority_key(tree, _token_node(token), anchor) + (0 if token.startswith(PROSE) else 1,)
 
+    def internal_frontier() -> list[str]:
+        return [n for n in _frontier_of(tree, expanded) if not tree.nodes[n].is_leaf]
+
+    # 1. The page as it is now, one plain step per applied token.
+    remaining = set(keep)
+    while remaining:
+        front = set(internal_frontier())
+        avail = [
+            t for t in remaining
+            if _token_node(t) in front and (t == _token_node(t) or _token_node(t) != tree.root)
+        ]
+        if not avail:
+            break
+        best = min(avail, key=key)
+        remaining.discard(best)
+        sequence.append(best)
+        _apply(tree, expanded, prose, best)
+
+    # 2. Everything else, merging steps that add too little.
+    committed = (set(expanded), set(prose))
+    v0 = visible_words(tree, _frontier_of(tree, expanded), prose)
+    pending: list[str] = []
+    while True:
+        cands = []
+        for nid in internal_frontier():
+            cands.append(nid if nid == tree.root or nid in prose else PROSE + nid)
+        if pending:
+            work = (set(expanded), set(prose))
+            allowed = []
+            for t in cands:
+                direct = (set(committed[0]), set(committed[1]))
+                _apply(tree, direct[0], direct[1], t)
+                chained = (set(work[0]), set(work[1]))
+                _apply(tree, chained[0], chained[1], t)
+                if _same_page(tree, direct, chained):
+                    allowed.append(t)
+            if not allowed:
+                # Nothing can continue the tentative steps: emit the last one alone.
+                sequence.append(pending[-1])
+                committed = (set(expanded), set(prose))
+                v0 = visible_words(tree, _frontier_of(tree, expanded), prose)
+                pending = []
+                continue
+            cands = allowed
+        if not cands:
+            break
+        best = min(cands, key=key)
+        _apply(tree, expanded, prose, best)
+        pending.append(best)
+        v1 = visible_words(tree, _frontier_of(tree, expanded), prose)
+        # A pass-through level (one child) never counts as content: not its
+        # prose, not its expansion, and not a page that newly shows one.
+        was = set(_frontier_of(tree, committed[0]))
+        single = len(tree.nodes[_token_node(best)].children) == 1 or any(
+            len(tree.nodes[n].children) == 1
+            for n in _frontier_of(tree, expanded)
+            if n not in was and not tree.nodes[n].is_leaf
+        )
+        need = max(1.0, min(GAIN_FRACTION * v0, GAIN_WORDS))
+        if not single and v1 - v0 >= need:
+            sequence.append(best)
+            committed = (set(expanded), set(prose))
+            v0 = v1
+            pending = []
+    if pending:
+        sequence.append(pending[-1])
     return sequence
+
+
+def _replay(tree: Tree, sequence: list[str], k: int) -> tuple[set[str], set[str]]:
+    expanded: set[str] = set()
+    prose: set[str] = set()
+    for token in sequence[:k]:
+        _apply(tree, expanded, prose, token)
+    return expanded, prose
 
 
 def frontier_at(tree: Tree, sequence: list[str], k: int) -> list[str]:
     """Replay the first k steps of `sequence` onto {root}, returning the
     resulting frontier in document order (by source_span start). Prose
-    tokens don't change the frontier, only how a node is shown."""
-    frontier = {tree.root}
-    for token in sequence[:k]:
-        if token.startswith(PROSE):
-            continue
-        frontier.discard(token)
-        frontier.update(tree.nodes[token].children)
-    return sorted(frontier, key=lambda nid: tree.nodes[nid].source_span[0])
+    tokens don't change the frontier (beyond opening their ancestors), only
+    how a node is shown."""
+    expanded, _ = _replay(tree, sequence, k)
+    return sorted(_frontier_of(tree, expanded), key=lambda nid: tree.nodes[nid].source_span[0])
 
 
 def prose_at(sequence: list[str], k: int) -> set[str]:

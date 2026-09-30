@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import re
 
 from riemann.abstraction.chunk import TINY_DOC_WORDS, chunk, word_count
-from riemann.abstraction.model import KeyFact, Node, Tree
+from riemann.abstraction.model import Essential, KeyFact, Node, Overview, Tree
 from riemann.abstraction.summarise import Summariser, parse_json_robustly
 
 RATIO = 3  # compression per step; Forte's practitioner funnel suggests 2.5-4x (weak evidence)
@@ -402,6 +403,12 @@ def _number_tokens(text: str) -> list[str]:
     return _NUMBER_TOKEN_RE.findall(text or "")
 
 
+def _prose_numbers(text: str) -> list[str]:
+    """Number-like tokens of a sentence, minus the sentence punctuation the
+    token regex swallows ("2," "2025." -> "2" "2025")."""
+    return [t.rstrip(".,") for t in _number_tokens(text) if t.rstrip(".,")]
+
+
 def _validate_key_fact(raw: object, nodes: dict[str, Node], leaf_ctx_ids: list[str]) -> KeyFact | None:
     """Deterministic validation: every number-like token in big/detail must
     appear in the text of the cited leaves, or the whole KeyFact is dropped."""
@@ -454,6 +461,152 @@ async def _call_summariser_json(summariser: Summariser, prompt: str, system: str
     if result is not None:
         return result
     raise ValueError(f"Summariser did not return valid JSON after retry (prompt started: {prompt[:120]!r})")
+
+
+# ---------------------------------------------------------------------------
+# Overview card: "what is this" + the few essentials, above section 01
+# ---------------------------------------------------------------------------
+OVERVIEW_TITLE_MAX_WORDS = 16
+OVERVIEW_KIND_MAX_WORDS = 4
+OVERVIEW_WHAT_MAX_WORDS = 45
+ESSENTIALS_MIN = 3
+ESSENTIALS_MAX = 7
+ESSENTIAL_LABEL_MAX_WORDS = 5
+ESSENTIAL_VALUE_MAX_WORDS = 45
+OVERVIEW_LEAF_WORD_BUDGET = 4000
+OVERVIEW_SECTION_TEXT_WORDS = 90
+
+OVERVIEW_SYSTEM = """You write the "what is this" card that sits above a document in a reading app, so a reader who reads nothing else still knows what the document is and its key facts.
+Respond with ONLY JSON, no prose outside it and no markdown code fences:
+{"doc_title": "...", "doc_kind": "...", "what_it_is": "...",
+ "essentials": [{"label": "...", "value": "...", "cites": ["leaf_id", ...]}]}
+
+"doc_title": the document's OWN name, as its author would title it (e.g. "MMA3001 Individual Project brief: Numerical Methods and Machine Learning"). Take it from the source's heading, header or first lines; never a summary sentence. At most 16 words.
+"doc_kind": what kind of document it is, in 1-4 words (e.g. "Assignment brief", "Research paper", "Meeting notes", "Email thread", "Article", "Policy", "Contract").
+"what_it_is": ONE plain sentence saying what it is and who it is for or what it is about (e.g. "This is the brief for your individual MMA3001 project, worth 25% of the unit."). No more than 45 words.
+"essentials": 3 to 7 items, each a short "label" (1-5 words) and a "value" (a tight phrase or a short imperative list, ideally under 20 words and never more than 30). Choose the labels for THIS kind of document and this reader's goal, the things they would want to see at a glance. Examples by kind:
+- assignment or task: Deliverables, Due, Weight, Submit how, What you need to do, Assessed on
+- paper or article: Main claim, Evidence, Limits
+- decision: Options, Recommendation, Deadline
+- plan: Milestones, Next action, Dependencies
+- email or message: The ask, From, Reply by
+- reference or guide: Covers, Key rules, Where to look
+Every value must come from the source. Never invent or guess: if the source does not say (for example no due date is given), write exactly "not stated" for that value and leave its cites empty. Copy numbers, dates and names exactly as the source writes them.
+"cites": leaf ids only, from the "Leaf ids you may cite" list, naming the leaves the value comes from. Every number in a value must appear in a cited leaf."""
+
+
+# What the reader's goal makes the most useful essentials (appended to the
+# overview prompt after the OBJECTIVE_FOCUS block).
+OVERVIEW_ESSENTIALS: dict[str, str] = {
+    "execute": "For this reader, prefer essentials like: Deliverables, Due, Weight, Submit how, What you need to do (a short imperative list is fine as the value), Assessed on.",
+    "learn": "For this reader, prefer essentials like: Main idea, Key concepts, Why it matters, Prerequisites.",
+    "decide": "For this reader, prefer essentials like: The decision, Options, Recommendation, Deadline, Criteria.",
+    "reference": "For this reader, prefer essentials like: Covers, Key rules or values, Where to look, Applies to.",
+    "plan": "For this reader, prefer essentials like: Milestones, Next action, Dependencies, Dates, Owners.",
+    "communicate": "For this reader, prefer essentials like: The ask, From, Reply by, What is needed from you.",
+}
+
+
+def _leaf_ids_in_order(tree: Tree) -> list[str]:
+    if tree.root not in tree.nodes:
+        return []
+    return _leaves_under(tree.nodes, tree.root)
+
+
+def _overview_prompt(tree: Tree) -> tuple[str, list[str]]:
+    """The overview call's prompt: the root and section summaries, then the
+    source's leaves in order (up to ~4000 words) with their ids for citation."""
+    nodes = tree.nodes
+    root = nodes[tree.root]
+    lines = ["Task: overview", f"Document title (as extracted): {tree.title}", "", "Top-level summary:", root.text, ""]
+    secs = [s for s in (tree.sections or []) if s in nodes]
+    if secs:
+        lines.append("Sections:")
+        for sid in secs:
+            n = nodes[sid]
+            body = " ".join(n.text.split()[:OVERVIEW_SECTION_TEXT_WORDS])
+            lines.append(f"- {n.title or 'section'} (cites: {', '.join(n.cites[:6])}): {body}")
+        lines.append("")
+    lines.append("Source, in order:")
+    shown: list[str] = []
+    used = 0
+    for lid in _leaf_ids_in_order(tree):
+        leaf = nodes[lid]
+        if used and used + leaf.words > OVERVIEW_LEAF_WORD_BUDGET:
+            break
+        lines.append(f"--- leaf {lid} ---")
+        lines.append(leaf.text)
+        shown.append(lid)
+        used += leaf.words
+    lines.append("")
+    lines.append(f"Leaf ids you may cite (in order): {', '.join(shown)}")
+    return "\n".join(lines), shown
+
+
+def _clean_essentials(raw: object, nodes: dict[str, Node], all_leaf_ids: set[str]) -> list[Essential]:
+    """Deterministic validation: drop an item with no label/value, a duplicate
+    label, or a value with a number that is not in its cited leaves (cites must
+    be real leaf ids). "not stated" needs no cites."""
+    if not isinstance(raw, list):
+        return []
+    out: list[Essential] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        label, value = item.get("label"), item.get("value")
+        if not isinstance(label, str) or not label.strip() or not isinstance(value, str) or not value.strip():
+            continue
+        label = _truncate_words(label.strip().rstrip(":"), ESSENTIAL_LABEL_MAX_WORDS)
+        value = _truncate_words(value.strip(), ESSENTIAL_VALUE_MAX_WORDS)
+        if label.lower() in seen:
+            continue
+        cites_raw = item.get("cites")
+        cites = [c for c in cites_raw if isinstance(c, str) and c in all_leaf_ids] if isinstance(cites_raw, list) else []
+        source = " ".join(nodes[c].text for c in cites).lower()
+        if any(tok.lower() not in source for tok in _prose_numbers(value)):
+            continue
+        seen.add(label.lower())
+        out.append(Essential(label=label, value=value, cites=cites))
+        if len(out) >= ESSENTIALS_MAX:
+            break
+    return out
+
+
+def _clean_overview(raw: object, tree: Tree) -> Overview | None:
+    if not isinstance(raw, dict):
+        return None
+    doc_title = raw.get("doc_title")
+    doc_kind = raw.get("doc_kind")
+    what = raw.get("what_it_is")
+    if not isinstance(doc_title, str) or not doc_title.strip() or not isinstance(doc_kind, str) or not doc_kind.strip():
+        return None
+    doc_title = _truncate_words(doc_title.strip(), OVERVIEW_TITLE_MAX_WORDS)
+    doc_kind = _truncate_words(doc_kind.strip().rstrip("."), OVERVIEW_KIND_MAX_WORDS)
+    source_lower = tree.source_text.lower()
+    what_ok = isinstance(what, str) and what.strip() and all(t.lower() in source_lower for t in _prose_numbers(what))
+    if what_ok:
+        what = _truncate_words(what.strip(), OVERVIEW_WHAT_MAX_WORDS)
+    else:
+        article = "an" if doc_kind[:1].lower() in "aeiou" else "a"
+        what = f"This is {article} {doc_kind[:1].lower() + doc_kind[1:]}."
+    all_leaf_ids = {i for i in _leaf_ids_in_order(tree)}
+    essentials = _clean_essentials(raw.get("essentials"), tree.nodes, all_leaf_ids)
+    return Overview(doc_title=doc_title, doc_kind=doc_kind, what_it_is=what, essentials=essentials)
+
+
+async def generate_overview(tree: Tree, summariser: Summariser) -> Overview | None:
+    """One model call (root/section summaries + the source's first ~4000 words
+    with leaf ids) for the overview card; validated deterministically. None if
+    the tree has no internal structure or the reply is unusable."""
+    if tree.root not in tree.nodes or tree.nodes[tree.root].is_leaf:
+        return None
+    prompt, _shown = _overview_prompt(tree)
+    system = with_objective(OVERVIEW_SYSTEM, tree.objective)
+    if tree.objective in OVERVIEW_ESSENTIALS:
+        system += "\n\n" + OVERVIEW_ESSENTIALS[tree.objective]
+    result = await _call_summariser_json(summariser, prompt, system)
+    return _clean_overview(result, tree)
 
 
 class TreeBuilder:
@@ -749,14 +902,61 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
         for child_id in nodes[node_id].children:
             assign_depth(child_id, depth + 1)
 
+    collapse_single_child_chains(nodes, final_root_id)
     assign_depth(final_root_id, 0)
     tree.nodes = nodes
     tree.max_depth = max(n.depth for n in nodes.values())
-    tree.status = "done"
     tree.sections = compute_sections(tree)
+
+    # The overview is part of "done": anything polling the tree's status must
+    # not see a finished tree that is about to gain its card.
+    try:
+        tree.overview = await generate_overview(tree, summariser)
+    except Exception as exc:  # noqa: BLE001 - the reader backfills the overview on open
+        logging.getLogger("riemann").warning("overview generation failed: %s", type(exc).__name__)
+        tree.overview = None
+    tree.status = "done"
 
     _save(tree)
     await builder._emit("done", {"tree": tree.model_dump()})
+
+
+def collapse_single_child_chains(nodes: dict[str, Node], root_id: str) -> None:
+    """Never keep a pass-through level. An internal node with exactly one
+    internal child absorbs it (takes over its children, keeps its own summary
+    fields), repeatedly; a non-root internal node left with a single leaf child
+    is replaced by that leaf. Such chains come from the forced summarising of a
+    lone remaining node (root over one node over one node ...), and only make
+    the first zoom steps reword the same paragraph. Mutates `nodes` in place."""
+
+    def collapse(nid: str) -> None:
+        node = nodes[nid]
+        if node.is_leaf:
+            return
+        while len(node.children) == 1 and not nodes[node.children[0]].is_leaf:
+            child = nodes.pop(node.children[0])
+            node.children = list(child.children)
+            for cid in node.children:
+                nodes[cid].parent = nid
+        for cid in list(node.children):
+            collapse(cid)
+        # a child that ended up with a single leaf child is replaced by that leaf
+        new_children: list[str] = []
+        for cid in node.children:
+            c = nodes[cid]
+            if not c.is_leaf and len(c.children) == 1:
+                leaf = nodes[c.children[0]]
+                leaf.parent = nid
+                leaf.importance = c.importance
+                leaf.title = leaf.title or c.title
+                leaf.short_title = leaf.short_title or c.short_title
+                del nodes[cid]
+                new_children.append(leaf.id)
+            else:
+                new_children.append(cid)
+        node.children = new_children
+
+    collapse(root_id)
 
 
 def compute_sections(tree: Tree) -> list[str]:

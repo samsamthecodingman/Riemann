@@ -48,21 +48,13 @@ def test_k_total_gives_exactly_leaves():
     assert set(frontier_at(tree, seq, total)) == leaves
 
 
-def test_sequence_is_topologically_valid():
+def test_sequence_tokens_are_reachable_and_unique():
     tree = _make_tree()
     seq = expansion_sequence(tree)
-    # a node can only be expanded once its parent is in the frontier,
-    # i.e. once the parent has itself already been expanded (or is root).
-    # Tokens: "~x" (show x's summary as prose) needs x's parent expanded;
-    # "x" (expand) needs "~x" first, except for the root.
-    applied: set[str] = set()
+    assert len(seq) == len(set(seq))
     for token in seq:
-        if token.startswith("~"):
-            node = tree.nodes[token[1:]]
-            assert node.parent in applied
-        else:
-            assert token == tree.root or "~" + token in applied
-        applied.add(token)
+        assert (token[1:] if token.startswith("~") else token) in tree.nodes
+        assert not tree.nodes[token.lstrip("~")].is_leaf
 
 
 def test_frontier_is_monotonic():
@@ -74,12 +66,17 @@ def test_frontier_is_monotonic():
         # every previous frontier node is either still present, or was
         # replaced by exactly its children (never removed with nothing
         # taking its place, never collapsed back to an ancestor)
-        removed = set(prev) - set(cur)
-        assert len(removed) <= 1
-        if removed:
-            removed_id = next(iter(removed))
-            assert set(tree.nodes[removed_id].children) <= set(cur)
+        # (a merged step may open several levels at once, so "replaced by
+        # descendants" rather than "by exactly its children")
+        for nid in set(prev) - set(cur):
+            assert set(_descendants(tree, nid)) & set(cur)
         prev = cur
+
+
+def _descendants(tree, nid):
+    for c in tree.nodes[nid].children:
+        yield c
+        yield from _descendants(tree, c)
 
 
 def test_k_for_z_bounds():
@@ -94,8 +91,9 @@ def test_anchor_prioritises_nearby_nodes():
     # when both are candidates in the frontier simultaneously.
     seq = expansion_sequence(tree, anchor_id="a1")
     assert seq[0] == "root"
-    assert seq[1] == "~a"  # nearer to a1 than b is: its bullets become prose first
-    assert seq[2] == "a"
+    # nearer to a1 than b is, so a opens first (its prose step adds nothing
+    # visible here -- no bullets -- so it is merged into the expansion)
+    assert seq.index("a") < seq.index("b")
 
 
 def test_find_anchor_replacement_contains_old_offset():
@@ -106,24 +104,82 @@ def test_find_anchor_replacement_contains_old_offset():
     assert replacement == "a2"
 
 
-def test_each_step_changes_one_passage():
-    """A step either turns one node's bullets into its paragraph (frontier
-    unchanged) or opens one paragraph into its parts."""
-    from riemann.abstraction.frontier import prose_at
+def _skim_tree(chain: bool) -> Tree:
+    """A document shaped like the one that prompted the visible-growth rule:
+    root -> A (one child) -> B -> two sections with paragraphs (chain=True), or
+    the same content with the single-child levels collapsed (chain=False)."""
+    def words(n, tag):
+        return " ".join(f"{tag}{i}" for i in range(n))
 
-    tree = _make_tree()
+    nodes: dict[str, Node] = {}
+
+    def add(nid, parent, depth, n_words, children, span, leaf=False, skim=True):
+        nodes[nid] = Node(
+            id=nid, depth=depth, text=words(n_words, nid), words=n_words, children=children,
+            parent=parent, is_leaf=leaf, source_span=span, importance=0.5,
+            title=None if leaf else f"Title of {nid}",
+            key_points=[] if leaf or not skim else [words(10, nid + "k"), words(10, nid + "m")],
+            hook=None if leaf else words(8, nid + "h"),
+        )
+
+    if chain:
+        add("root", None, 0, 20, ["A"], (0, 400))
+        add("A", "root", 1, 44, ["B"], (0, 400))
+        add("B", "A", 2, 119, ["S1", "S2"], (0, 400))
+        sec_parent, sec_depth = "B", 3
+    else:
+        add("root", None, 0, 20, ["S1", "S2"], (0, 400))
+        sec_parent, sec_depth = "root", 1
+    for i, sid in enumerate(("S1", "S2")):
+        lo = i * 200
+        add(sid, sec_parent, sec_depth, 90, [sid + "a", sid + "b", sid + "c"], (lo, lo + 200))
+        for j, suffix in enumerate("abc"):
+            add(sid + suffix, sid, sec_depth + 1, 70, [], (lo + j * 60, lo + j * 60 + 60), leaf=True)
+    return Tree(id="t", title="T", source_text="x" * 400, source_words=420, root="root",
+                nodes=nodes, max_depth=4, status="done")
+
+
+def _page_words(tree, seq, k):
+    from riemann.abstraction.frontier import prose_at, visible_words
+    return visible_words(tree, frontier_at(tree, seq, k), prose_at(seq, k))
+
+
+@pytest.mark.parametrize("chain", [True, False])
+def test_every_step_adds_visible_words(chain):
+    """The zoom-step rule: each step adds at least min(15%, 25 words) of
+    visible text, so a step never just rewords the page. (Only the last step
+    of a sequence may fall short, if nothing was left to merge it with.)"""
+    from riemann.abstraction.frontier import GAIN_FRACTION, GAIN_WORDS
+
+    tree = _skim_tree(chain)
+    for anchor in ("root", "S1", "S2b") if not chain else ("root", "B", "S1a"):
+        seq = expansion_sequence(tree, anchor)
+        counts = [_page_words(tree, seq, k) for k in range(len(seq) + 1)]
+        assert counts == sorted(set(counts)), f"visible words not strictly increasing: {counts}"
+        for before, after in zip(counts, counts[1:]):
+            assert after - before >= min(GAIN_FRACTION * before, GAIN_WORDS) - 1e-9
+
+
+def test_single_child_chain_is_merged_through():
+    tree = _skim_tree(chain=True)
     seq = expansion_sequence(tree)
-    for k in range(1, len(seq) + 1):
-        f0, f1 = frontier_at(tree, seq, k - 1), frontier_at(tree, seq, k)
-        p0, p1 = prose_at(seq, k - 1), prose_at(seq, k)
-        token = seq[k - 1]
-        if token.startswith("~"):
-            assert f0 == f1 and p1 - p0 == {token[1:]}
-        else:
-            assert set(f0) - set(f1) == {token}
-            assert set(f1) - set(f0) == set(tree.nodes[token].children)
-            # a node opens only after it has been read as prose (root excepted)
-            assert token == tree.root or token in p0
+    # root and A are single-child levels: no step may show A, so the first
+    # step lands on B, the first level that actually splits.
+    assert frontier_at(tree, seq, 1) == ["B"]
+    for k in range(len(seq) + 1):
+        assert not {"root", "A"} & set(frontier_at(tree, seq, k)) or k == 0
+    assert set(frontier_at(tree, seq, len(seq))) == {n for n in tree.nodes if tree.nodes[n].is_leaf}
+
+
+def test_fixture_visible_words_strictly_increase():
+    import json
+    from pathlib import Path
+
+    tree = Tree.model_validate(json.loads((Path(__file__).resolve().parent.parent / "web" / "dev-fixture.json").read_text()))
+    for anchor in tree.nodes:
+        seq = expansion_sequence(tree, anchor)
+        counts = [_page_words(tree, seq, k) for k in range(len(seq) + 1)]
+        assert counts == sorted(set(counts)), f"anchor {anchor}: {counts}"
 
 
 def test_new_internal_children_start_as_skim():

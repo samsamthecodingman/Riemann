@@ -8,6 +8,7 @@ isn't there yet.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -20,6 +21,8 @@ from riemann.abstraction import build, cache, ingest
 from riemann.abstraction.summarise import BLOCKED_MODELS, default_model, get_summariser, list_models
 
 app = FastAPI(title="Riemann")
+
+_OVERVIEW_TASKS: dict[str, asyncio.Future] = {}
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
@@ -113,6 +116,41 @@ async def api_short_titles(tree_id: str) -> dict:
         if added:
             cache.save_tree(tree)
     return {"titles": build.short_titles_below_sections(tree), "added": len(added)}
+
+
+@app.post("/api/tree/{tree_id}/overview")
+async def api_overview(tree_id: str) -> dict:
+    """Backfill the overview card for trees built before it existed: one model
+    call from the root/section summaries plus the source's first ~4000 words.
+    Once per tree: returns the stored overview if there is one. The tree is
+    saved into the current cache namespace (older ones stay read-only).
+    Returns {"overview": {...} | null, "added": bool}."""
+    builder = build.get_builder(tree_id)
+    if builder is not None and builder.tree.status == "building":
+        raise HTTPException(409, "tree is still building")
+    tree = builder.tree if builder is not None else cache.load_tree(tree_id)
+    if tree is None:
+        raise HTTPException(404, "no such tree")
+    if tree.overview is not None:
+        return {"overview": tree.overview.model_dump(), "added": False}
+    # One generation per tree at a time: a second request awaits the first.
+    task = _OVERVIEW_TASKS.get(tree_id)
+    if task is None:
+        task = asyncio.ensure_future(build.generate_overview(tree, get_summariser(model=default_model())))
+        _OVERVIEW_TASKS[tree_id] = task
+    try:
+        overview = await task
+    except Exception as exc:  # noqa: BLE001 - the reader simply shows no overview card
+        raise HTTPException(502, f"could not generate overview: {type(exc).__name__}") from exc
+    finally:
+        if _OVERVIEW_TASKS.get(tree_id) is task:
+            del _OVERVIEW_TASKS[tree_id]
+    if tree.overview is not None:
+        return {"overview": tree.overview.model_dump(), "added": False}
+    if overview is not None:
+        tree.overview = overview
+        cache.save_tree(tree)
+    return {"overview": overview.model_dump() if overview else None, "added": overview is not None}
 
 
 @app.get("/api/tree/{tree_id}/events")
