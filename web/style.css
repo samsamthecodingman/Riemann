@@ -2726,3 +2726,14 @@ body.col-dragging * {
 #section-nav {
   overflow-wrap: anywhere;
 }
+
+/* Short labels never break inside themselves (the wrap rule above would split "01"). */
+.nav-n,
+.pill-n,
+.provenance,
+.ov-kind,
+.map-num,
+.rail-label {
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
