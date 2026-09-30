@@ -73,19 +73,50 @@ A folding panel on the home page asks about energy, mood, sleep, caffeine and me
 - **Local only:** trees and the reading-event log live on your machine, under `~/.local/share/riemann/` by default. Nothing is sent anywhere except the model calls themselves.
 - **Accessibility:** it respects reduced motion, all interactive parts are buttons with labels, and it has a full-screen map sheet on phones.
 
-## Running it
+## Setup
 
-Requirements: Python 3.12+ and [uv](https://docs.astral.sh/uv/).
+Riemann runs on your own computer and uses your own Claude account for the summaries. The easiest route is through a Claude Code login, so any Claude plan that includes Claude Code works, and there's no API key to manage.
+
+**1. Install the tools**
+
+- [uv](https://docs.astral.sh/uv/getting-started/installation/), the Python package manager. It fetches Python 3.12 for you if you don't have it.
+- [Claude Code](https://docs.claude.com/en/docs/claude-code/setup). After installing, run `claude` once and log in.
+- Git, to download the repo.
+
+**2. Download Riemann and install its dependencies**
 
 ```bash
-uv sync --extra dev
+git clone https://github.com/samsamthecodingman/Riemann.git
 ```
 
 ```bash
-uv run uvicorn riemann.server:app --port 8765
+cd Riemann && uv sync
 ```
 
-Then open <http://localhost:8765>.
+**3. Start it using your Claude Code login**
+
+macOS or Linux:
+
+```bash
+RIEMANN_PROVIDER=agent-sdk uv run uvicorn riemann.server:app --port 8765
+```
+
+Windows (PowerShell):
+
+```powershell
+$env:RIEMANN_PROVIDER="agent-sdk"; uv run uvicorn riemann.server:app --port 8765
+```
+
+**4. Open <http://localhost:8765>**, paste some text and press **Build gist**.
+
+**Good to know**
+
+- The first build of a long document takes a minute or two. After that it's cached and opens instantly.
+- Each build uses your own Claude plan's usage. A typical article is a handful of requests.
+- An "unrecognized model" warning in the terminal is harmless if builds still work. If builds fail with a model error, update Claude Code, or start Riemann with `RIEMANN_MODEL` set to a model your version supports.
+- To stop Riemann, press Ctrl+C in the terminal.
+- To update to the latest version, run `git pull` and then `uv sync`.
+- To try it without using any Claude usage, open <http://localhost:8765/?fixture=1>, which loads a built-in sample document.
 
 ### Model access
 
