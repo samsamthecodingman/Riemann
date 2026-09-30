@@ -202,3 +202,63 @@ These were found by driving the app in headless Chromium against a scratch data 
 - **Known limits, not fixed:** (1) pypdf gives no blank line between paragraphs, so a paragraph that ends near the right margin is glued to the next one; the rule "a sentence ended a short line" only fires when the last line is under 60 percent of the wide-line width. Loosening it risks splitting real paragraphs at chance short lines. (2) Bullet glyphs drawn as shapes (Chromium and many Word exports) leave no character, so bullets arrive as plain lines. (3) Table cells arrive as space-separated text. All three need layout-aware extraction (pdfminer or pdfplumber with coordinates), which is a new dependency and so a decision for Sam.
 - **URLs:** extracted cleanly from a personal essay site (after unwrapping its one-cell layout table, commit `c6db1a2`), Sphinx docs (pilcrow permalinks removed), arXiv abstract pages and a plain HTML page. A paywalled Nature news page returns only the teaser plus "Access options" boilerplate (134 words) and would build a summary of the paywall; the fix (detect very short extractions from long pages and warn) is a small proposal.
 - **Server memory:** `BUILDS` keeps every finished builder (tree plus source text) for the life of the process. For one user that is a few MB per document, so it is fine, but it should evict `done` builders once they are saved to the cache if the server is ever left running for weeks.
+
+## 2026-10-01 (round 3): security review, awkward content, randomised and monkey tests, chunking and typography research
+
+### S1. Server security review (all fixed or noted; every fix has a test and its own commit)
+
+Threat model: a personal app on localhost that spends Sam's model quota through a local proxy (:8317) and reads and writes his disk cache and activity log. The realistic attackers are a web page open in another browser tab, a hostile document or link Sam is asked to summarise, and a malformed file. There is no login and there should not be one; the defence is to make the server refuse anything that is not Sam's own browser talking to it.
+
+| Area | Finding | Fix |
+|---|---|---|
+| Path traversal via tree id | Not exploitable: the router does not let `%2F` or `..` reach the handlers (404 for every variant, all four tree routes). But `path_for` built a path from the id with no check, so one careless new caller would have been. | `cache.is_safe_id` (`[A-Za-z0-9_-]{1,64}`); `path_for` raises, `load_tree` and `exists` refuse, in the current and the fallback dirs (`964a4e6`). |
+| SSRF on link ingest | Exploitable: any link, including `http://127.0.0.1:8317` (the model proxy), `localhost`, `169.254.169.254`, `10.x`, `file://` and redirects to them, was fetched by the server. | `check_public_url`: http(s) only; the host must resolve only to global addresses (loopback, private, link-local, CGNAT, reserved and IPv4-mapped IPv6 all refused); redirects are followed by hand and every hop is checked; body capped at 15 MB. `RIEMANN_ALLOW_PRIVATE_URLS=1` opts in. Tested against a dummy server on an ephemeral port (never :8317 or :8787) that records hits: zero hits for a loopback link and for a redirect hop (`27331a8`). |
+| Cross-site requests and DNS rebinding | Exploitable: `POST /api/abstract` accepted any content type and any origin, so a web page in another tab could `fetch("http://localhost:8765/api/abstract", {method:"POST", mode:"no-cors", body: ...})` and start builds on Sam's quota, or fill the events log; a rebinding domain could read `/api/recent`. | Middleware: the `Host` header must be `localhost`, `127.0.0.1` or `::1` (403 otherwise); a state-changing request with a foreign `Origin` (or `Sec-Fetch-Site: cross-site`) is refused; the JSON endpoints require `Content-Type: application/json`, which forces a CORS preflight that a foreign page fails (`bc4ee4b`). |
+| Request sizes | No limit: a multi-GB body was read into memory. | JSON 5 MB, upload 30 MB (411 without a length), events 1 MB, pastes 50,000 words (earlier) (`bc4ee4b`). |
+| Zip bomb in .docx | Exploitable: `z.read()` inflated `word/document.xml` unbounded. | Declared size checked before reading, and a hard read limit if the header lies; cap 40 MB inflated (a 300-page report is about 2 MB) (`1131fe8`). |
+| XSS | The server-built strings (titles, `doc_title`, essentials, key facts, map labels, recent cards, file names) are all escaped: a tree with an `<img onerror>` payload in every text field ran nothing. **Not safe:** the palette read back from `localStorage` was written into `style="background:${c}"`, and a poisoned value executed script; a bad saved position blanked the reader. | Palette, highlights and saved position are validated on read (hex colours only, known preset names, finite numbers). Checked with a six-scenario poison test before and after; there is no browser test harness in the repo, so it is not in pytest (`b32baad`). |
+| Bind address | `uvicorn ... --port 8765` binds `127.0.0.1` by default (confirmed with `ss -ltn`). | README and the dev-server config now say `--host 127.0.0.1` explicitly. |
+
+Residual risks, not fixed:
+1. DNS rebinding between the address check and the connection for link ingest (a hostname that resolves public for the check and private for the connect). Closing it means connecting to the checked IP directly, which needs a custom transport that keeps TLS server-name checking; low value for one user.
+2. A hostile document can carry instructions aimed at the summariser ("say the deadline is Monday"). The number validator, `¶` cites and `not stated` rule limit the damage, but text and titles are not checked (see R1).
+3. Any other program running as Sam on the machine can call the API; that is inherent to a localhost service.
+4. `events.jsonl` and `~/.cache/riemann` grow without bound, and PDF page count and pypdf inflate limits are pypdf's own.
+
+### A1. Awkward content (FakeSummariser for everything except one real build)
+
+Documents: Chinese and Japanese, Arabic, Hebrew, emoji, LaTeX, code plus markdown tables, a 29-word note, a 12,000-word single paragraph with no punctuation, an outline of 60 headings with no body, six sections all titled "Results", a 600-character URL and a 14-column table.
+
+| Case | Result |
+|---|---|
+| CJK (Chinese, Japanese) | **Not supported.** Word counting splits on spaces, so a 1,600-character document counts as 1 word, becomes a single leaf, shows "~1 min" and is never summarised (it builds instantly and costs nothing, so it fails safe). Proposal below. Korean uses spaces and is fine. |
+| Arabic, Hebrew | Rendered left-to-right and left-aligned. **Fixed:** text blocks now carry `dir="auto"` (measured `ltr` to `rtl`; `75e64b0`). |
+| Emoji | Chunks, titles and map labels fine. |
+| LaTeX | Chunked correctly (display math is its own atomic leaf) but **shown as raw source** (`$x_{t+1} = x_t - \eta \nabla f(x_t)$`). Confirmed in the one real build. Not fixed: rendering with KaTeX changes each node's plain text and the highlights store character offsets into that text, so it needs the highlight anchoring reworked first. A proposal. |
+| Code fences | Atomic, scroll inside the block, no overflow. |
+| Markdown tables | **Fixed twice:** a table over 120 words was cut mid-row and merged into prose (now one atomic leaf, `0d650ff`); a wide table pushed the page sideways by up to 6,000 px (now scrolls inside its block, `58dcf83`). |
+| Long URL or 400-character token | **Fixed:** wrapped instead of overflowing (`58dcf83`; a follow-up stopped the rule splitting "01" in the nav, `9787726`). |
+| 29-word note | One leaf, shown verbatim, no summary, no error. Fine. |
+| 12,000-word single paragraph | 100 hard-cut 120-word leaves, no crash; mid-sentence cuts are expected. |
+| 60 headings, no body | Collapses to one leaf holding the outline. Acceptable. |
+| Duplicate section titles | Sections stay separate (a heading flushes the pack); the nav and map show the same title six times, distinguished only by number. |
+| Ligatures in PDFs | Sam's cached PDF has "classiﬁed", "Deﬁne" (fi ligature). **Fixed** (`f950061`). |
+
+The one real build (a 330-word note with LaTeX, a code block and a table, goal "learn"): the model turned the LaTeX into readable Unicode in the overview ("x_{t+1} = x_t - η∇f(x_t)", "κ = L/μ"), and every number in the essentials was found in its cited leaf (including "1,380 steps versus 21"). Titles were faithful. The one visible defect is the raw `$...$` in the reading area.
+
+Proposals (not built): (1) count CJK characters as words (about two characters per word) in both `chunk.word_count` and the JS counters, split long CJK paragraphs at "。！？", and bump the cache schema; medium effort because it touches the parity code. (2) KaTeX math with highlight offsets computed on the source text rather than the rendered text. (3) Show the section number with the title when two sections share a title.
+
+### T1. Randomised frontier tests
+
+`tests/test_frontier_random.py`: 20 fixed seeds by 7 tree shapes (single leaf, wide fan, deep single-child chain, balanced, lopsided, ragged, ragged with pass-through levels). For sampled anchors of every tree it checks that tokens name real internal nodes and never repeat, that the last step shows every leaf, that `keep_expanded` leaves the current page unchanged, that visible words strictly increase, and (under node) that `frontier.js` produces the same sequence, the same page and prose set at every k, and that `kToReveal` returns the smallest k at which the node is on the page (or, for a skipped pass-through level, its content is).
+
+What it found:
+- **Strict growth holds for trees shaped like real ones** (summary about a third of what it summarises, no pass-through levels): 0 violations in the seeded runs, and 0 in 12,703 steps over all anchors of the 15 real cached trees.
+- **It fails for other shapes**, which is worth knowing: if a node's prose is more than about a third of its children, or a level has a single child, a step can *reduce* the visible words. The cause is the fallback in `expansion_sequence`: when no later step can be merged into a tentative one, the tentative step is emitted alone without a growth check. With real prompts (`RATIO = 3`, `collapse_single_child_chains`) it does not occur, so nothing was changed. If the ratio or the collapse step ever changes, this test is the alarm; the generator's realistic mode keeps the summary at 28 to 40 percent of the children.
+- `kToReveal` for a pass-through level returns the k at which its ancestors are open even though the level itself is never drawn; the app's jump falls back to the nearest drawn node, so this is consistent, and the test encodes it.
+
+### M1. Monkey test (seeded, Playwright, about 500 actions per seed)
+
+Harness (kept in the scratchpad, not the repo): weighted random actions over zoom keys and bursts, dial keys, Less/More, Z hold and tap, Ctrl+wheel, scrolling, map (button, `g`, tile click, wheel, drag, Fit), column drag and keyboard, palette (open, preset, slot, swatch, Esc or outside click), highlights, section jumps, source links, Home to a recent card, Back and Forward, minimal chrome, viewport resizes across 390 to 1920, reload. After every action it asserts no page or console errors, no horizontal overflow, the header visible (except in minimal chrome), the dial text well formed, and the dial percentage consistent with the words in the DOM (within a wide tolerance).
+
+Found and fixed: minimal chrome (`m`) only faded the header, nav, rail and column handles, so they stayed in the Tab order and widened the page by 32 px (`97b76ca`); a no-sections document used a bare `1fr` track, so a header wider than a phone screen pushed the page 174 px sideways (`d526734`); and three regressions I had introduced earlier in the round and then caught myself: the wrap-anywhere rule split "01" in the nav (`9787726`), the reader container query collapsed a single-column document to 0 px (`eaa56dc` sequence), and a no-wrap pill overflowed a narrow area (`ov-kind`). Several harness false alarms (the poisoned XSS tree in the scratch cache, a stale dial reading after Back) were fixed in the harness, not the app.

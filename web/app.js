@@ -570,6 +570,11 @@
     }
     $rail.style.opacity = "0";
     setTimeout(() => {
+      // Home or another document may have replaced this one during the fade.
+      if (state.tree !== tree) {
+        $rail.style.opacity = "1";
+        return;
+      }
       doUpdate();
       requestAnimationFrame(() => {
         $rail.style.opacity = "1";
