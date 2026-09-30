@@ -1229,6 +1229,11 @@
     renderPaletteOpenState();
   });
   document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$hlToolbar.hidden) {
+      hideHighlightToolbar();
+      window.getSelection().removeAllRanges();
+      return;
+    }
     if (state.paletteOpen && e.key === "Escape") {
       state.paletteOpen = false;
       renderPaletteOpenState();
