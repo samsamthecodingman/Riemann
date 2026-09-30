@@ -1732,6 +1732,10 @@
   function maybeShowHint() {
     if (!$zoomHint || hintSeen()) return;
     markHintSeen();
+    // Touch screens have no Z key or wheel: point at the buttons instead.
+    if (window.matchMedia && window.matchMedia("(hover: none)").matches) {
+      $zoomHint.textContent = "Tap More + for more detail and \u2212 Less for less.";
+    }
     $zoomHint.hidden = false;
     requestAnimationFrame(() => $zoomHint.classList.add("visible"));
     hintTimer = setTimeout(dismissHint, 8000);
