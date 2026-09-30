@@ -472,7 +472,7 @@ OVERVIEW_WHAT_MAX_WORDS = 45
 ESSENTIALS_MIN = 3
 ESSENTIALS_MAX = 7
 ESSENTIAL_LABEL_MAX_WORDS = 5
-ESSENTIAL_VALUE_MAX_WORDS = 45
+ESSENTIAL_VALUE_MAX_WORDS = 30  # shown in full, never clamped; keep in step with the prompt
 OVERVIEW_LEAF_WORD_BUDGET = 4000
 OVERVIEW_SECTION_TEXT_WORDS = 90
 
@@ -484,7 +484,7 @@ Respond with ONLY JSON, no prose outside it and no markdown code fences:
 "doc_title": the document's OWN name, as its author would title it (e.g. "MMA3001 Individual Project brief: Numerical Methods and Machine Learning"). Take it from the source's heading, header or first lines; never a summary sentence. At most 16 words.
 "doc_kind": what kind of document it is, in 1-4 words (e.g. "Assignment brief", "Research paper", "Meeting notes", "Email thread", "Article", "Policy", "Contract").
 "what_it_is": ONE plain sentence saying what it is and who it is for or what it is about (e.g. "This is the brief for your individual MMA3001 project, worth 25% of the unit."). No more than 45 words.
-"essentials": 3 to 7 items, each a short "label" (1-5 words) and a "value" (a tight phrase or a short imperative list, ideally under 20 words and never more than 30). Choose the labels for THIS kind of document and this reader's goal, the things they would want to see at a glance. Examples by kind:
+"essentials": 3 to 7 items, each a short "label" (1-5 words) and a "value" (a tight phrase or a short imperative list, ideally under 15 words and never more than 30; it is shown in full, so keep it short: names, dates, numbers, not clauses). Choose the labels for THIS kind of document and this reader's goal, the things they would want to see at a glance. Examples by kind:
 - assignment or task: Deliverables, Due, Weight, Submit how, What you need to do, Assessed on
 - paper or article: Main claim, Evidence, Limits
 - decision: Options, Recommendation, Deadline

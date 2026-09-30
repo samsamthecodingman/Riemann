@@ -1269,7 +1269,6 @@ button.source-link:focus-visible .source-link-more {
   border-radius: var(--radius-sm);
   padding: 5px 10px 6px;
   min-width: 0;
-  cursor: pointer;
 }
 
 .ov-item dt {
@@ -1290,20 +1289,6 @@ button.source-link:focus-visible .source-link-more {
   line-height: 1.38;
   color: var(--text);
   overflow-wrap: anywhere;
-}
-
-/* Long values are clamped to two lines; a click on the tile shows the rest. */
-.ov-item dd > span {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-}
-
-.ov-item.open dd > span {
-  display: inline;
-  -webkit-line-clamp: unset;
-  overflow: visible;
 }
 
 .ov-item dd.ov-unstated span {

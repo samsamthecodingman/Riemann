@@ -768,7 +768,7 @@
           ? `<button type="button" class="provenance source-link" data-leaf="${escapeHtml((e.cites || [])[0] || "")}" title="Read the original text">${escapeHtml(prov)}</button>`
           : "";
         const stated = !/^not stated\.?$/i.test((e.value || "").trim());
-        return `<div class="ov-item" style="--sec-n: var(--sec-${(i % 5) + 1})" title="Click to show or hide the full text">
+        return `<div class="ov-item" style="--sec-n: var(--sec-${(i % 5) + 1})">
           <dt><span>${escapeHtml(e.label)}</span>${provHTML}</dt>
           <dd class="${stated ? "" : "ov-unstated"}"><span>${renderInline(e.value)}</span></dd>
         </div>`;
@@ -1141,8 +1141,6 @@
     }
     const link = e.target.closest(".source-link");
     if (!link) {
-      const tile = e.target.closest(".ov-item");
-      if (tile) tile.classList.toggle("open");
       return;
     }
     if (link.dataset.leaf) {

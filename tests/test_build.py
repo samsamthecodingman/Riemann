@@ -426,3 +426,12 @@ def test_overview_drops_bad_items_and_invented_numbers():
     assert ov.essentials[3].cites == []  # unknown leaf ids are dropped
     assert _clean_overview({"doc_title": "", "doc_kind": "x"}, tree) is None
     assert _clean_overview("nope", tree) is None
+
+
+def test_essential_value_is_capped_by_validator_not_clamped():
+    from riemann.abstraction.build import ESSENTIAL_VALUE_MAX_WORDS, _clean_essentials
+
+    long_value = " ".join(["word"] * 80)
+    out = _clean_essentials([{"label": "Due", "value": long_value, "cites": []}], {}, set())
+    assert len(out) == 1
+    assert len(out[0].value.split()) == ESSENTIAL_VALUE_MAX_WORDS == 30

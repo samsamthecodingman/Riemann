@@ -55,7 +55,7 @@ dropped); `what_it_is` falls back to "This is a <kind>." if it contains a number
 labels are dropped; "not stated" is the value for anything the source does not say.
 
 UI: the card sits above section 01 at every zoom level (kind pill, title, sentence, 2-column essentials tiles,
-each with its `¶` link; values clamp to three lines, click a tile for the rest). At the gist the hero shows a
+each with its `¶` link; values are shown in full, never clamped: the prompt asks for under 15 words and the validator caps a value at 30). At the gist the hero shows a
 "THE GIST" kicker instead of repeating the title. The header title uses `doc_title`.
 
 Old trees: `POST /api/tree/{id}/overview` builds it from the root and section summaries plus the source's leaves
