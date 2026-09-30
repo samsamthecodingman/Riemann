@@ -256,3 +256,20 @@ async def test_older_cache_namespaces_still_open_and_list(tmp_path):
         assert resp.json()["added"] is True
         assert (old_dir / current.name).read_text() == before
         assert cache.exists(tree_id)
+
+
+def test_clean_url_adds_scheme_and_trims():
+    from riemann.abstraction.ingest import clean_url
+
+    assert clean_url("  example.com/page ") == "https://example.com/page"
+    assert clean_url("http://example.com") == "http://example.com"
+    assert clean_url("HTTPS://Example.com") == "HTTPS://Example.com"
+
+
+async def test_bad_url_gets_a_short_message():
+    async with await _client() as client:
+        r = await client.post("/api/abstract", json={"url": "http://127.0.0.1:1/x"})
+    assert r.status_code == 400
+    detail = r.json()["detail"]
+    assert detail.startswith("could not fetch that link:")
+    assert "httpx" not in detail and "mozilla" not in detail

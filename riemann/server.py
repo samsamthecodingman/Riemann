@@ -55,7 +55,7 @@ async def api_abstract(request: Request) -> dict:
             try:
                 title, text = await ingest.from_url(url)
             except Exception as exc:
-                raise HTTPException(400, f"could not fetch url: {exc}") from exc
+                raise HTTPException(400, f"could not fetch that link: {ingest.fetch_error_message(exc)}") from exc
         elif raw_text:
             title, text = ingest.from_text(raw_text)
         else:
