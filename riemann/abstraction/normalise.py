@@ -366,3 +366,189 @@ def normalise_text(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = "\n".join(ln.rstrip() for ln in text.split("\n"))
     return text.strip()
+
+
+# ---------------------------------------------------------------------------
+# Email clean-up (ingest, pasted text and text files only; never a fetched page)
+# ---------------------------------------------------------------------------
+_HEADER_FIELD_RE = re.compile(r"^(From|To|Cc|Bcc|Subject|Date|Sent|Reply-To):[ \t]*\S", re.I)
+_ORIGINAL_MARKER_RE = re.compile(r"^\s*-{2,}\s*(original|reply)\s+message\s*-{2,}\s*$", re.I)
+_UNDERSCORE_RULE_RE = re.compile(r"^\s*_{10,}\s*$")
+_ATTRIB_START_RE = re.compile(r"^\s*On\s.{2,}", re.I)
+_SIGNOFF_RE = re.compile(
+    r"^\s*(?:best(?: regards| wishes)?|(?:kind |warm |many |best )?regards|thanks(?: again| very much)?|thank you|many thanks|"
+    r"cheers|sincerely|yours (?:sincerely|faithfully)|cordially|warmly|with thanks),?\s*$",
+    re.I,
+)
+_MOBILE_FOOTER_RE = re.compile(r"^\s*(sent from my .{2,40}|get outlook for .{2,20}|sent via .{2,40}|sent from (?:mail|outlook) for .{2,20})\s*$", re.I)
+_CONTACT_RE = re.compile(
+    r"(@\w|https?://|www\.|\btel\b|\bphone\b|\bmobile\b|\bfax\b|\bext\b|\+\d[\d ()-]{6,}|\b\d{3,4}[ -]\d{3,4}[ -]\d{3,4}\b|\|)",
+    re.I,
+)
+_DISCLAIMER_INDICATORS = [
+    re.compile(p, re.I)
+    for p in (
+        r"not the intended recipient",
+        r"intended (?:only )?for (?:the )?(?:named |intended )?(?:recipient|addressee|use of)",
+        r"received this (?:e-?mail|message|communication|transmission) in error",
+        r"\bprivileged\b",
+        r"confidentiality (?:notice|statement)",
+        r"\b(?:e-?mail|message)\b[^.]{0,80}\bconfidential\b",
+        r"unauthori[sz]ed (?:use|disclosure|copying|review|distribution)",
+        r"please consider the environment",
+        r"\bdisclaimer\b",
+        r"\bvirus(?:es)?\b.{0,40}\b(?:scan|free|checked)",
+    )
+]
+_DISCLAIMER_LEAD_RE = re.compile(
+    r"^\s*(this (?:e-?mail|message|communication)|confidential|disclaimer|notice|please consider the environment|think before you print|"
+    r"the information (?:in|contained in) this)",
+    re.I,
+)
+
+
+def _attribution_len(lines: list[str], i: int) -> int:
+    """Lines used by an "On <date>, <name> wrote:" attribution that starts at i
+    (it often wraps onto the next line or two), else 0."""
+    if not _ATTRIB_START_RE.match(lines[i]):
+        return 0
+    joined = lines[i].strip()
+    for extra in range(3):
+        if re.search(r"wrote:\s*$", joined, re.I):
+            return extra + 1
+        if i + extra + 1 >= len(lines) or not lines[i + extra + 1].strip():
+            return 0
+        joined += " " + lines[i + extra + 1].strip()
+    return 0
+
+
+def _leading_header_end(lines: list[str]) -> int:
+    """Index after the message's own header block (From:/To:/Subject:/Date: at the very top), or 0."""
+    i = 0
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    start = i
+    while i < len(lines) and lines[i].strip() and (_HEADER_FIELD_RE.match(lines[i]) or (i > start and lines[i][:1] in " \t")):
+        i += 1
+    return i if i > start else 0
+
+
+def _is_outlook_block(lines: list[str], i: int) -> bool:
+    """"From: X" followed within a few lines by "Sent:" and "To:"/"Subject:": the header of quoted history."""
+    if not re.match(r"^From:\s*\S", lines[i], re.I):
+        return False
+    window = [ln for ln in lines[i + 1 : i + 6]]
+    return any(re.match(r"^Sent:\s*\S", ln, re.I) for ln in window) and any(re.match(r"^(To|Subject|Cc):", ln, re.I) for ln in window)
+
+
+def looks_like_email(text: str) -> bool:
+    """Does this pasted text look like an email (or a thread)? Headers at the
+    top (two or more of From/To/Subject/Date/Sent/Cc), an "On ... wrote:"
+    attribution line, an "Original Message" marker, a "Sent from my ..." footer or an Outlook history header.
+    Quoting with ">" or a "-- " line alone is not enough."""
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    top = _leading_header_end(lines)
+    fields = {m.group(1).lower() for ln in lines[:top] if (m := _HEADER_FIELD_RE.match(ln))}
+    if len(fields) >= 2:
+        return True
+    for i, ln in enumerate(lines):
+        if _ORIGINAL_MARKER_RE.match(ln) or _MOBILE_FOOTER_RE.match(ln) or _is_outlook_block(lines, i):
+            return True
+        if _attribution_len(lines, i):
+            return True
+    return False
+
+
+def _drop_signatures(lines: list[str]) -> list[str]:
+    out: list[str] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        ln = lines[i]
+        if re.fullmatch(r"--\s?", ln.rstrip("\n")) or re.fullmatch(r"--\s?", ln):
+            # the "-- " delimiter: a signature to the end of the message (the next header block, or the end)
+            j = i + 1
+            while j < n and not (_HEADER_FIELD_RE.match(lines[j]) and re.match(r"^From:", lines[j], re.I)):
+                j += 1
+            i = j
+            continue
+        if _MOBILE_FOOTER_RE.match(ln):
+            i += 1
+            continue
+        if _SIGNOFF_RE.match(ln):
+            j = i + 1
+            block: list[str] = []
+            while j < n and lines[j].strip() and len(block) < 9 and not _HEADER_FIELD_RE.match(lines[j]):
+                block.append(lines[j])
+                j += 1
+            if block and len(block) <= 8 and all(len(b) <= 90 for b in block) and (
+                len(block) >= 3 or any(_CONTACT_RE.search(b) for b in block)
+            ):
+                i = j  # sign-off, name, title, phone, address: the whole block
+                continue
+        out.append(ln)
+        i += 1
+    return out
+
+
+def _drop_disclaimers(text: str) -> str:
+    paras = re.split(r"\n\s*\n", text)
+    keep: list[str] = []
+    for para in paras:
+        hits = sum(1 for rx in _DISCLAIMER_INDICATORS if rx.search(para))
+        if hits >= 2 or (hits == 1 and _DISCLAIMER_LEAD_RE.match(para)):
+            continue
+        keep.append(para)
+    return "\n\n".join(keep)
+
+
+def strip_email_noise(text: str) -> str:
+    """For text that looks like an email: drop the quoted reply history ("> "
+    lines, "On ... wrote:" attributions, an Outlook "Original Message" tail),
+    signatures (the "-- " delimiter, sign-off blocks with contact details,
+    "Sent from my ..."), and legal or environmental footers. The newest
+    message, its own headers, and any new text written between quoted lines
+    stay. Anything else is returned untouched, and so is an email where
+    nothing new would be left. Deterministic and idempotent."""
+    if not text or not looks_like_email(text):
+        return text
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    body_start = _leading_header_end(lines)
+
+    # 1. Cut an Outlook-style history tail (only when something new comes before it).
+    cut = None
+    for i in range(body_start, len(lines)):
+        if _ORIGINAL_MARKER_RE.match(lines[i]) or _is_outlook_block(lines, i):
+            if any(ln.strip() for ln in lines[body_start:i]):
+                cut = i
+                if i > 0 and _UNDERSCORE_RULE_RE.match(lines[i - 1]):
+                    cut = i - 1
+                break
+    if cut is not None:
+        lines = lines[:cut]
+
+    # 2. Quoted lines and their attribution lines.
+    kept: list[str] = []
+    i = 0
+    while i < len(lines):
+        used = _attribution_len(lines, i)
+        if used:
+            j = i + used
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+            if j >= len(lines) or lines[j].lstrip().startswith(">"):
+                i = j  # the attribution goes; the quoted lines after it go in the next steps
+                continue
+        if lines[i].lstrip().startswith(">"):
+            i += 1
+            continue
+        kept.append(lines[i])
+        i += 1
+
+    out = _drop_disclaimers("\n".join(_drop_signatures(kept)))
+    out = re.sub(r"\n{3,}", "\n\n", out)
+    out = "\n".join(ln.rstrip() for ln in out.split("\n")).strip()
+    body_words = len(re.sub(r"^(?:[A-Za-z-]+:[ \t]*.*)$", "", out, flags=re.M).split())
+    if body_words < 8:
+        return text  # nothing new would be left: keep what was pasted
+    return out

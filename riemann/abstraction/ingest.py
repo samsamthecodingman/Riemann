@@ -11,7 +11,7 @@ import re
 
 import httpx
 
-from riemann.abstraction.normalise import normalise_text
+from riemann.abstraction.normalise import normalise_text, strip_email_noise
 
 
 def _shorten(line: str, limit: int = 90) -> str:
@@ -35,8 +35,8 @@ def _title_from_text(text: str, fallback: str) -> str:
 
 
 def from_text(text: str, title: str | None = None) -> tuple[str, str]:
-    """Plain pasted text/markdown."""
-    text = normalise_text(text)
+    """Plain pasted text/markdown. Pasted email loses its quoted history, signature and legal footer."""
+    text = normalise_text(strip_email_noise(text))
     return (title or _title_from_text(text, "Untitled"), text)
 
 
@@ -53,7 +53,7 @@ def from_file(filename: str, content: bytes) -> tuple[str, str]:
     if content[:4] == b"PK\x03\x04" or b"\x00" in content[:4096]:
         raise ValueError("that file type is not supported; use .pdf, .docx, .md or .txt")
     # .md / .txt / anything else: decode as text
-    text = normalise_text(content.decode("utf-8", errors="replace"))
+    text = normalise_text(strip_email_noise(content.decode("utf-8", errors="replace")))
     title = _title_from_text(text, filename)
     return (title, text)
 
