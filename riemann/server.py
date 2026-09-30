@@ -22,6 +22,9 @@ from riemann.abstraction.summarise import BLOCKED_MODELS, default_model, get_sum
 
 app = FastAPI(title="Riemann")
 
+# Each ~120 words is a model call or more; refuse a runaway paste up front.
+MAX_SOURCE_WORDS = 50_000
+
 _OVERVIEW_TASKS: dict[str, asyncio.Future] = {}
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -66,6 +69,12 @@ async def api_abstract(request: Request) -> dict:
 
     if not text.strip():
         raise HTTPException(400, "no content to abstract")
+    n_words = len(text.split())
+    if n_words > MAX_SOURCE_WORDS:
+        raise HTTPException(
+            400,
+            f"that is {n_words:,} words; Riemann handles up to {MAX_SOURCE_WORDS:,} at a time. Try one chapter or section.",
+        )
 
     model = model or default_model()
     if model in BLOCKED_MODELS:

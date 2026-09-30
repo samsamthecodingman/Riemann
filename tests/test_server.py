@@ -273,3 +273,11 @@ async def test_bad_url_gets_a_short_message():
     detail = r.json()["detail"]
     assert detail.startswith("could not fetch that link:")
     assert "httpx" not in detail and "mozilla" not in detail
+
+
+async def test_huge_paste_is_refused_before_any_build():
+    async with await _client() as client:
+        r = await client.post("/api/abstract", json={"text": "word " * 50_001})
+    assert r.status_code == 400
+    assert "50,000" in r.json()["detail"]
+    assert not build.BUILDS
