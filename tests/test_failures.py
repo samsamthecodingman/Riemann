@@ -116,3 +116,123 @@ async def test_unexpected_exception_gets_a_plain_message():
     msg = b.history[-1][1]["message"]
     assert msg != "'choices'"
     assert "try again" in msg.lower()
+
+
+# ---------------------------------------------------------------------------
+# ProxySummariser: retries, Retry-After, and plain messages
+# ---------------------------------------------------------------------------
+import httpx
+
+from riemann.abstraction.summarise import ProxySummariser
+
+
+@pytest.fixture
+def proxy(monkeypatch):
+    """A ProxySummariser whose HTTP goes to a handler list; sleeps are recorded, not waited."""
+    state = {"calls": 0, "sleeps": [], "handler": None}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        state["calls"] += 1
+        return state["handler"](state["calls"], request)
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+
+    async def fake_sleep(seconds):
+        state["sleeps"].append(seconds)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    monkeypatch.setenv("RIEMANN_PROXY_KEY", "dummy")
+    state["s"] = ProxySummariser(model="m", base_url="http://127.0.0.1:1")
+    return state
+
+
+def _ok(text="{}"):
+    return httpx.Response(200, json={"choices": [{"message": {"content": text}}]})
+
+
+async def test_429_waits_for_retry_after_then_succeeds(proxy):
+    proxy["handler"] = lambda n, r: httpx.Response(429, headers={"Retry-After": "3"}) if n == 1 else _ok("hi")
+    assert await proxy["s"].summarise("p", "s") == "hi"
+    assert proxy["sleeps"] == [3.0]
+
+
+async def test_persistent_429_fails_clearly_after_three_attempts(proxy):
+    proxy["handler"] = lambda n, r: httpx.Response(429)
+    with pytest.raises(ModelError) as e:
+        await proxy["s"].summarise("p", "s")
+    assert proxy["calls"] == 3
+    assert "rate" in str(e.value).lower()
+    assert "developer.mozilla" not in str(e.value) and "127.0.0.1" not in str(e.value)
+
+
+async def test_huge_retry_after_fails_fast_with_the_wait(proxy):
+    proxy["handler"] = lambda n, r: httpx.Response(429, headers={"Retry-After": "600"})
+    with pytest.raises(ModelError) as e:
+        await proxy["s"].summarise("p", "s")
+    assert proxy["calls"] == 1 and proxy["sleeps"] == []
+    assert "10 minutes" in str(e.value) or "600" in str(e.value)
+
+
+async def test_500_then_ok_retries(proxy):
+    proxy["handler"] = lambda n, r: httpx.Response(500) if n < 3 else _ok("fine")
+    assert await proxy["s"].summarise("p", "s") == "fine"
+    assert proxy["calls"] == 3
+
+
+async def test_persistent_500_message(proxy):
+    proxy["handler"] = lambda n, r: httpx.Response(502, text="<html>Bad gateway</html>")
+    with pytest.raises(ModelError) as e:
+        await proxy["s"].summarise("p", "s")
+    assert "502" in str(e.value) and "<html>" not in str(e.value) and "127.0.0.1" not in str(e.value)
+
+
+async def test_timeout_retries_once_then_says_too_slow(proxy):
+    def h(n, r):
+        raise httpx.ReadTimeout("slow", request=r)
+
+    proxy["handler"] = h
+    with pytest.raises(ModelError) as e:
+        await proxy["s"].summarise("p", "s")
+    assert proxy["calls"] == 2
+    assert "too long" in str(e.value) or "slow" in str(e.value)
+
+
+async def test_proxy_down_says_so(proxy):
+    def h(n, r):
+        raise httpx.ConnectError("refused", request=r)
+
+    proxy["handler"] = h
+    with pytest.raises(ModelError) as e:
+        await proxy["s"].summarise("p", "s")
+    assert "reach" in str(e.value).lower() and "proxy" in str(e.value).lower()
+
+
+async def test_auth_error_is_not_retried(proxy):
+    proxy["handler"] = lambda n, r: httpx.Response(401, json={"error": {"message": "bad key sk-SECRET"}})
+    with pytest.raises(ModelError) as e:
+        await proxy["s"].summarise("p", "s")
+    assert proxy["calls"] == 1
+    assert "401" in str(e.value) and "sk-SECRET" not in str(e.value)
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(200, text="not json at all"),
+        httpx.Response(200, json={"id": "x"}),
+        httpx.Response(200, json={"choices": []}),
+        httpx.Response(200, json={"error": {"message": "upstream exploded"}}),
+        httpx.Response(200, json=[1, 2]),
+        httpx.Response(200, json={"choices": ["nope"]}),
+    ],
+)
+async def test_malformed_200_replies_become_model_errors(proxy, response):
+    proxy["handler"] = lambda n, r: response
+    with pytest.raises(ModelError):
+        await proxy["s"].summarise("p", "s")
+
+
+async def test_null_content_is_returned_empty_for_the_build_to_retry(proxy):
+    proxy["handler"] = lambda n, r: httpx.Response(200, json={"choices": [{"message": {"content": None}}]})
+    assert await proxy["s"].summarise("p", "s") == ""

@@ -190,36 +190,95 @@ class ProxySummariser:
             "temperature": 0.2,
         }
 
-        last_error: Exception | None = None
         async with httpx.AsyncClient(timeout=120.0) as client:
-            for attempt in range(2):
+            for attempt in range(self.MAX_ATTEMPTS):
+                last = attempt == self.MAX_ATTEMPTS - 1
                 try:
                     resp = await client.post(
                         f"{self.base_url}/v1/chat/completions", headers=headers, json=body
                     )
-                except (httpx.ConnectError, httpx.TimeoutException, httpx.TransportError) as exc:
-                    last_error = exc
+                except httpx.TimeoutException as exc:
+                    # A call that already ran for two minutes will not do better on a third try.
                     if attempt == 0:
-                        await self._backoff()
+                        await self._backoff(attempt)
                         continue
-                    raise
+                    raise ModelError(
+                        "The model took too long to answer (over two minutes, twice). "
+                        "Try again, or pick a faster model."
+                    ) from exc
+                except httpx.TransportError as exc:
+                    if not last:
+                        await self._backoff(attempt)
+                        continue
+                    raise ModelError(
+                        "Could not reach the model service. Is the proxy running? Start it, then try again."
+                    ) from exc
 
                 self._raise_on_cooldown(resp)
 
                 if resp.status_code == 429 or resp.status_code >= 500:
-                    last_error = RuntimeError(
-                        f"ProxySummariser: {resp.status_code} from {self.base_url}"
-                    )
-                    if attempt == 0:
-                        await self._backoff()
+                    wait = self._retry_after(resp)
+                    if wait is not None and wait > self.MAX_RETRY_AFTER:
+                        raise ModelError(
+                            f"The model is rate-limiting requests and asked for a wait of about "
+                            f"{self._human_wait(wait)}. Try again after that, or pick another model."
+                        )
+                    if not last:
+                        await self._backoff(attempt, wait)
                         continue
-                    resp.raise_for_status()
+                    if resp.status_code == 429:
+                        raise ModelError(
+                            "The model is rate-limiting requests (too many at once or quota used up). "
+                            "Wait a minute and try again, or pick another model."
+                        )
+                    raise ModelError(
+                        f"The model service is having trouble (error {resp.status_code}). "
+                        "Try again in a moment, or pick another model."
+                    )
 
-                resp.raise_for_status()
-                data = resp.json()
-                return data["choices"][0]["message"]["content"]
+                if resp.status_code >= 400:
+                    raise ModelError(
+                        f"The model service refused the request (error {resp.status_code}). "
+                        "Check the model choice and the proxy's settings."
+                    )
+                return self._content_of(resp)
 
-        raise last_error or RuntimeError("ProxySummariser: request failed")
+        raise ModelError("The model service did not answer. Try again.")  # unreachable in practice
+
+    MAX_ATTEMPTS = 3
+    MAX_RETRY_AFTER = 30.0  # seconds; a longer wait is reported, not slept through
+
+    @staticmethod
+    def _human_wait(seconds: float) -> str:
+        return f"{round(seconds)} seconds" if seconds < 120 else f"{round(seconds / 60)} minutes"
+
+    @staticmethod
+    def _retry_after(resp) -> float | None:
+        raw = resp.headers.get("retry-after")
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None  # absent, or an HTTP date: use the ordinary backoff
+        return value if value >= 0 else None
+
+    @staticmethod
+    def _content_of(resp) -> str:
+        """The reply text of a 200 response, or a ModelError if the body is not a chat completion.
+        A null or empty content comes back as "" (the build retries once, then reports it)."""
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            raise ModelError("The model service sent something that was not JSON (maybe an error page). Try again.") from exc
+        choices = data.get("choices") if isinstance(data, dict) else None
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            err = data.get("error") if isinstance(data, dict) else None
+            said = err.get("message") if isinstance(err, dict) else err if isinstance(err, str) else None
+            if isinstance(said, str) and said.strip():
+                raise ModelError(f"The model service reported a problem: {said.strip()[:160]}")
+            raise ModelError("The model service replied without any answer in it. Try again.")
+        message = choices[0].get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        return content if isinstance(content, str) else ""
 
     def _raise_on_cooldown(self, resp) -> None:
         if resp.status_code < 400:
@@ -236,10 +295,10 @@ class ProxySummariser:
                 f"Pick another model on the home page (e.g. 'gemini-3.8-flash-high') and try again."
             )
 
-    async def _backoff(self) -> None:
+    async def _backoff(self, attempt: int = 0, retry_after: float | None = None) -> None:
         import asyncio
 
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(retry_after if retry_after is not None else 0.5 * 2**attempt)
 
 
 def get_summariser(model: str | None = None) -> Summariser:
