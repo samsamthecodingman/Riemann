@@ -85,7 +85,7 @@ async def test_non_object_json_is_retried_then_a_clear_error():
     b = start_build("fail-array", "T", _doc(), s)
     await b.task
     assert b.tree.status == "error"
-    assert s.calls == 2
+    assert s.calls >= 2  # the gist and the first layer are asked for together; each gets its retry
     msg = b.history[-1][1]["message"]
     assert "'list' object" not in msg and "AttributeError" not in msg
     assert "not a usable reply" in msg or "usable" in msg
@@ -236,3 +236,76 @@ async def test_malformed_200_replies_become_model_errors(proxy, response):
 async def test_null_content_is_returned_empty_for_the_build_to_retry(proxy):
     proxy["handler"] = lambda n, r: httpx.Response(200, json={"choices": [{"message": {"content": None}}]})
     assert await proxy["s"].summarise("p", "s") == ""
+
+
+# ---------------------------------------------------------------------------
+# Scheduling: the quick gist is requested alongside the first layer, not before it
+# ---------------------------------------------------------------------------
+import time
+
+
+class Timed(FakeSummariser):
+    def __init__(self, delay=0.2):
+        super().__init__()
+        self.delay = delay
+        self.log = []  # (prompt kind, start, end)
+        self.inflight = 0
+        self.max_inflight = 0
+
+    async def summarise(self, prompt, system):
+        kind = "gist" if system.startswith("You are producing a fast provisional") else "other"
+        t0 = time.monotonic()
+        self.inflight += 1
+        self.max_inflight = max(self.max_inflight, self.inflight)
+        try:
+            await asyncio.sleep(self.delay)
+            return await super().summarise(prompt, system)
+        finally:
+            self.inflight -= 1
+            self.log.append((kind, t0, time.monotonic()))
+
+
+async def test_quick_gist_overlaps_the_first_layer():
+    s = Timed()
+    b = start_build("sched-overlap", "T", _doc(), s)
+    await b.task
+    assert b.tree.status == "done"
+    gist = next(e for e in s.log if e[0] == "gist")
+    first_other = min(e[1] for e in s.log if e[0] != "gist")
+    assert first_other < gist[2], "the first layer only started after the quick gist returned"
+    assert s.max_inflight <= build.MAX_CONCURRENCY + 1
+
+
+async def test_events_still_go_leaves_then_gist_then_levels_then_done():
+    # Even when the first layer is faster than the gist.
+    class SlowGist(Timed):
+        async def summarise(self, prompt, system):
+            if system.startswith("You are producing a fast provisional"):
+                await asyncio.sleep(0.3)
+            return await super().summarise(prompt, system)
+
+    s = SlowGist(delay=0.02)
+    b = start_build("sched-order", "T", _doc(), s)
+    await b.task
+    names = [n for n, _ in b.history]
+    assert names[0] == "leaves" and names[1] == "provisional_root" and names[-1] == "done"
+    assert "level" in names and names.index("level") > names.index("provisional_root")
+    assert b.tree.provisional_root is False
+    assert all(not n.text.startswith("(gist") for n in b.tree.nodes.values())
+    assert len([1 for n in b.tree.nodes.values() if n.parent is None]) == 1
+
+
+async def test_failure_of_the_quick_gist_fails_the_build_and_stops_the_rest():
+    class GistFails(Timed):
+        async def summarise(self, prompt, system):
+            if system.startswith("You are producing a fast provisional"):
+                raise ModelError("gist failed")
+            return await super().summarise(prompt, system)
+
+    s = GistFails(delay=0.02)
+    b = start_build("sched-gistfail", "T", _doc(), s)
+    await b.task
+    assert b.tree.status == "error" and b.history[-1][1]["message"] == "gist failed"
+    n = len(s.log)
+    await asyncio.sleep(0.3)
+    assert len(s.log) == n

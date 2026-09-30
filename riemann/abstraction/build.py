@@ -37,6 +37,16 @@ SHORT_TITLE_MAX_WORDS = 3
 SHORT_TITLE_MAX_CHARS = 24
 KEY_POINTS_MAX_ITEMS = 4
 KEY_POINT_MAX_WORDS = 18
+STEPS_MAX_ITEMS = 8
+STEP_MAX_WORDS = 20
+# Character caps back up the word caps: a hostile or broken reply can send one
+# enormous "word", which a word count alone never trims.
+TITLE_MAX_CHARS = 120
+HOOK_MAX_CHARS = 300
+POINT_MAX_CHARS = 300
+KEY_FACT_BIG_MAX_WORDS = 12
+KEY_FACT_DETAIL_MAX_WORDS = 40
+TEXT_MAX_WORDS = 400
 
 # "\d[\d,.]*" (numbers, incl. thousands separators/decimals), "billion",
 # "million", and decades like "1980s" (the trailing "s?" on the digit run
@@ -267,6 +277,16 @@ def _truncate_words(text: str, max_words: int) -> str:
     return " ".join(words[:max_words]).strip()
 
 
+def _cap_chars(text: str, max_chars: int) -> str:
+    """Cut to max_chars, at a word boundary when there is one."""
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+    cut = text[:max_chars]
+    space = cut.rfind(" ")
+    return (cut[:space] if space > max_chars // 2 else cut).rstrip(" ,;:-–")
+
+
 _DANGLING = {
     "a", "an", "the", "of", "to", "by", "in", "on", "at", "for", "and", "or", "with", "from",
     "as", "than", "that", "into", "via", "per", "is", "are", "be", "before", "after",
@@ -289,7 +309,7 @@ def _truncate_title(text: str, max_words: int = 8) -> str:
 def _clean_title(raw: object) -> str | None:
     if not isinstance(raw, str) or not raw.strip():
         return None
-    return _truncate_title(raw.strip(), TITLE_MAX_WORDS)
+    return _cap_chars(_truncate_title(raw.strip(), TITLE_MAX_WORDS), TITLE_MAX_CHARS)
 
 
 def _clean_short_title(raw: object) -> str | None:
@@ -395,7 +415,7 @@ async def backfill_short_titles(tree: Tree, summariser: Summariser) -> dict[str,
 def _clean_hook(raw: object) -> str | None:
     if not isinstance(raw, str) or not raw.strip():
         return None
-    return _truncate_words(raw.strip(), HOOK_MAX_WORDS)
+    return _cap_chars(_truncate_words(raw.strip(), HOOK_MAX_WORDS), HOOK_MAX_CHARS)
 
 
 def _clean_key_points(raw: object) -> list[str]:
@@ -405,7 +425,7 @@ def _clean_key_points(raw: object) -> list[str]:
     for item in raw:
         if not isinstance(item, str) or not item.strip():
             continue
-        out.append(_truncate_words(item.strip(), KEY_POINT_MAX_WORDS))
+        out.append(_cap_chars(_truncate_words(item.strip(), KEY_POINT_MAX_WORDS), POINT_MAX_CHARS))
         if len(out) >= KEY_POINTS_MAX_ITEMS:
             break
     return out
@@ -414,7 +434,8 @@ def _clean_key_points(raw: object) -> list[str]:
 def _clean_steps(raw: object) -> list[str]:
     if not isinstance(raw, list):
         return []
-    return [item.strip() for item in raw if isinstance(item, str) and item.strip()]
+    steps = [item.strip() for item in raw if isinstance(item, str) and item.strip()]
+    return [_cap_chars(_truncate_words(x, STEP_MAX_WORDS), POINT_MAX_CHARS) for x in steps[:STEPS_MAX_ITEMS]]
 
 
 def _clean_child_titles(raw: object, valid_child_ids: list[str]) -> dict[str, str]:
@@ -426,7 +447,7 @@ def _clean_child_titles(raw: object, valid_child_ids: list[str]) -> dict[str, st
     for child_id, title in raw.items():
         if child_id not in valid or not isinstance(title, str) or not title.strip():
             continue
-        out[child_id] = _truncate_title(title.strip(), TITLE_MAX_WORDS)
+        out[child_id] = _cap_chars(_truncate_title(title.strip(), TITLE_MAX_WORDS), TITLE_MAX_CHARS)
     return out
 
 
@@ -447,7 +468,7 @@ def _number_in_source(token: str, source_lower: str) -> bool:
         return True
     if not tok[0].isdigit():  # "billion", "million"
         return re.search(rf"\b{re.escape(tok)}\b", source_lower) is not None
-    pattern = r"(?<![\d.,])" + re.escape(_strip_thousands(tok)) + r"(?!\d|[.,]\d)"
+    pattern = r"(?<![\w.,])" + re.escape(_strip_thousands(tok)) + r"(?!\d|[.,]\d)"
     return re.search(pattern, _strip_thousands(source_lower)) is not None
 
 
@@ -466,11 +487,13 @@ def _validate_key_fact(raw: object, nodes: dict[str, Node], leaf_ctx_ids: list[s
     detail = raw.get("detail")
     if not isinstance(big, str) or not big.strip() or not isinstance(detail, str) or not detail.strip():
         return None
-    big = big.strip()
-    detail = detail.strip()
+    big = _cap_chars(_truncate_words(big.strip(), KEY_FACT_BIG_MAX_WORDS), TITLE_MAX_CHARS)
+    detail = _cap_chars(_truncate_words(detail.strip(), KEY_FACT_DETAIL_MAX_WORDS), POINT_MAX_CHARS)
 
     cites_raw = raw.get("cites")
     cites = [c for c in cites_raw if isinstance(c, str) and c in leaf_ctx_ids] if isinstance(cites_raw, list) else []
+    if not cites:  # a key fact must point at the source it came from
+        return None
     source_text = " ".join(nodes[c].text for c in cites if c in nodes).lower()
 
     for token in _number_tokens(big) + _number_tokens(detail):
@@ -608,8 +631,8 @@ def _clean_essentials(raw: object, nodes: dict[str, Node], all_leaf_ids: set[str
         label, value = item.get("label"), item.get("value")
         if not isinstance(label, str) or not label.strip() or not isinstance(value, str) or not value.strip():
             continue
-        label = _truncate_words(label.strip().rstrip(":"), ESSENTIAL_LABEL_MAX_WORDS)
-        value = _truncate_words(value.strip(), ESSENTIAL_VALUE_MAX_WORDS)
+        label = _cap_chars(_truncate_words(label.strip().rstrip(":"), ESSENTIAL_LABEL_MAX_WORDS), TITLE_MAX_CHARS)
+        value = _cap_chars(_truncate_words(value.strip(), ESSENTIAL_VALUE_MAX_WORDS), 600)
         if label.lower() in seen:
             continue
         cites_raw = item.get("cites")
@@ -632,12 +655,12 @@ def _clean_overview(raw: object, tree: Tree) -> Overview | None:
     what = raw.get("what_it_is")
     if not isinstance(doc_title, str) or not doc_title.strip() or not isinstance(doc_kind, str) or not doc_kind.strip():
         return None
-    doc_title = _truncate_words(doc_title.strip(), OVERVIEW_TITLE_MAX_WORDS)
-    doc_kind = _truncate_words(doc_kind.strip().rstrip("."), OVERVIEW_KIND_MAX_WORDS)
+    doc_title = _cap_chars(_truncate_words(doc_title.strip(), OVERVIEW_TITLE_MAX_WORDS), 200)
+    doc_kind = _cap_chars(_truncate_words(doc_kind.strip().rstrip("."), OVERVIEW_KIND_MAX_WORDS), 40)
     source_lower = tree.source_text.lower()
     what_ok = isinstance(what, str) and what.strip() and all(_number_in_source(t, source_lower) for t in _prose_numbers(what))
     if what_ok:
-        what = _truncate_words(what.strip(), OVERVIEW_WHAT_MAX_WORDS)
+        what = _cap_chars(_truncate_words(what.strip(), OVERVIEW_WHAT_MAX_WORDS), 400)
     else:
         article = "an" if doc_kind[:1].lower() in "aeiou" else "a"
         what = f"This is {article} {doc_kind[:1].lower() + doc_kind[1:]}."
@@ -793,30 +816,61 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
         {"nodes": [nodes[i].model_dump() for i in leaf_ids], "source_words": tree.source_words},
     )
 
-    # 1. Fast provisional root, emitted before any `level` event.
-    prov_prompt = _provisional_prompt(source_text, tree.title)
-    prov_result = await _call_summariser_json(
-        summariser, prov_prompt, with_objective(SYSTEM_PROVISIONAL, tree.objective)
-    )
-    prov_text = str(prov_result.get("text", "")).strip() or "(gist coming...)"
+    # 1. Fast provisional root. Its model call runs alongside the first layer
+    # (it does not depend on it); the event is still emitted before any `level`
+    # event, because every level emit awaits `ensure_provisional()` first.
     prov_id = _new_id(counter, (0, len(source_text)))
-    prov_node = Node(
-        id=prov_id,
-        depth=0,
-        text=prov_text,
-        words=word_count(prov_text),
-        children=[],
-        parent=None,
-        is_leaf=False,
-        source_span=(0, len(source_text)),
-        cites=[],
-        importance=1.0,
-        atomic=False,
-    )
-    tree.nodes[prov_id] = prov_node
-    tree.root = prov_id
-    tree.provisional_root = True
-    await builder._emit("provisional_root", {"node": prov_node.model_dump()})
+
+    async def make_provisional() -> None:
+        prov_prompt = _provisional_prompt(source_text, tree.title)
+        prov_result = await _call_summariser_json(
+            summariser, prov_prompt, with_objective(SYSTEM_PROVISIONAL, tree.objective)
+        )
+        raw_prov = prov_result.get("text")
+        prov_text = raw_prov.strip() if isinstance(raw_prov, str) else ""
+        prov_text = _cap_chars(_truncate_words(prov_text, 80), 600) or "(gist coming...)"
+        prov_node = Node(
+            id=prov_id,
+            depth=0,
+            text=prov_text,
+            words=word_count(prov_text),
+            children=[],
+            parent=None,
+            is_leaf=False,
+            source_span=(0, len(source_text)),
+            cites=[],
+            importance=1.0,
+            atomic=False,
+        )
+        tree.nodes[prov_id] = prov_node
+        tree.root = prov_id
+        tree.provisional_root = True
+        await builder._emit("provisional_root", {"node": prov_node.model_dump()})
+
+    prov_task = asyncio.ensure_future(make_provisional())
+
+    async def ensure_provisional() -> None:
+        await prov_task
+
+    try:
+        await _build_levels(builder, summariser, leaf_ids, boundary_keys, counter, prov_id, ensure_provisional)
+    finally:
+        if not prov_task.done():
+            prov_task.cancel()
+            await asyncio.gather(prov_task, return_exceptions=True)
+
+
+async def _build_levels(
+    builder: TreeBuilder,
+    summariser: Summariser,
+    leaf_ids: list[str],
+    boundary_keys: dict[str, tuple[str, ...] | None],
+    counter: list[int],
+    prov_id: str,
+    ensure_provisional,
+) -> None:
+    tree = builder.tree
+    nodes = tree.nodes
 
     # 2. Bottom-up build.
     sem = asyncio.Semaphore(MAX_CONCURRENCY)
@@ -833,7 +887,8 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
             prompt, leaf_ctx_ids = _build_prompt(nodes, group_ids)
 
             result = await _call_summariser_json(summariser, prompt, system)
-            text = str(result.get("text", "")).strip()
+            raw_text = result.get("text")
+            text = raw_text.strip() if isinstance(raw_text, str) else ""
             words = word_count(text)
 
             if target > 0 and words > 0 and abs(words - target) / target > LENGTH_TOLERANCE:
@@ -846,15 +901,17 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
                 retried = await _call_json(summariser, retry_prompt, system)
                 if retried is not None:
                     result = retried
-                    text = str(result.get("text", "")).strip() or text
+                    retried_text = result.get("text")
+                    text = (retried_text.strip() if isinstance(retried_text, str) else "") or text
                     words = word_count(text)
 
             if not text:
                 text = " ".join(nodes[c].text for c in group_ids)[:200]
-                words = word_count(text)
+            text = _cap_chars(_truncate_words(text, min(TEXT_MAX_WORDS, max(60, 3 * target))), 6 * TEXT_MAX_WORDS)
+            words = word_count(text)
 
             cites_raw = result.get("cites")
-            cites = [c for c in cites_raw if c in leaf_ctx_ids] if isinstance(cites_raw, list) else []
+            cites = [c for c in cites_raw if isinstance(c, str) and c in leaf_ctx_ids] if isinstance(cites_raw, list) else []
             importance_map = result.get("importance") if isinstance(result.get("importance"), dict) else {}
 
             title = _clean_title(result.get("title"))
@@ -913,6 +970,7 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
                 break
             nid, parent = await process_group([only], is_root_call=True, force=True)
             if parent is not None:
+                await ensure_provisional()
                 await builder._emit("level", {"nodes": [parent.model_dump()], "height": height + 1})
             current_level = [nid]
             height += 1
@@ -941,6 +999,7 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
         new_level = [nid for nid, _ in results]
         new_nodes = [node for _, node in results if node is not None]
         if new_nodes:
+            await ensure_provisional()
             await builder._emit("level", {"nodes": [n.model_dump() for n in new_nodes], "height": height + 1})
 
         current_level = new_level
@@ -952,6 +1011,8 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
 
     if final_root_id is None:
         final_root_id = current_level[0]
+
+    await ensure_provisional()
 
     # 3. Finalise: real root replaces the provisional one; depths via DFS
     # from the root (this is what makes the tree ragged -- a branch that
