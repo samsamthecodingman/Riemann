@@ -281,3 +281,12 @@ async def test_huge_paste_is_refused_before_any_build():
     assert r.status_code == 400
     assert "50,000" in r.json()["detail"]
     assert not build.BUILDS
+
+
+async def test_post_events_rejects_malformed_bodies_with_400():
+    async with await _client() as client:
+        bad_json = await client.post("/api/events", content=b"garbage", headers={"content-type": "application/json"})
+        not_objects = await client.post("/api/events", json=[1, "x"])
+        not_list = await client.post("/api/events", json={"a": 1})
+    assert (bad_json.status_code, not_objects.status_code, not_list.status_code) == (400, 400, 400)
+    assert not events_module.log_path().exists()

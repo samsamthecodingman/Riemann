@@ -195,9 +195,12 @@ async def api_tree_events(tree_id: str) -> EventSourceResponse:
 
 @app.post("/api/events", status_code=204)
 async def api_events(request: Request) -> Response:
-    body = await request.json()
-    if not isinstance(body, list):
+    try:
+        body = await request.json()
+    except ValueError:
         raise HTTPException(400, "expected a JSON array of events")
+    if not isinstance(body, list) or not all(isinstance(e, dict) for e in body):
+        raise HTTPException(400, "expected a JSON array of event objects")
     events.append_events(body)
     return Response(status_code=204)
 
