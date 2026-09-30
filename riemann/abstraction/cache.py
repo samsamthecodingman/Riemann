@@ -8,6 +8,7 @@ log dir (events.py mirrors this override -- see docs/v1-build-spec.md,
 from __future__ import annotations
 
 import hashlib
+import re
 import os
 from pathlib import Path
 
@@ -70,11 +71,24 @@ def tree_id_for(text: str, model: str | None = None, objective: str | None = Non
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
+_SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def is_safe_id(tree_id: object) -> bool:
+    """Tree ids are 16 hex digits (or short test names): never a path. Anything
+    with a dot, slash or backslash is refused before it can reach the disk."""
+    return isinstance(tree_id, str) and _SAFE_ID.fullmatch(tree_id) is not None
+
+
 def path_for(tree_id: str) -> Path:
+    if not is_safe_id(tree_id):
+        raise ValueError("invalid tree id")
     return cache_dir() / f"{tree_id}.json"
 
 
 def _find(tree_id: str) -> Path | None:
+    if not is_safe_id(tree_id):
+        return None
     for d in [cache_dir(), *legacy_dirs()]:
         path = d / f"{tree_id}.json"
         if path.exists():
@@ -97,7 +111,7 @@ def save_tree(tree: Tree) -> None:
 def exists(tree_id: str) -> bool:
     """Whether a tree with this id is cached *under the current build
     version* (an older-version tree is openable but not a reusable build)."""
-    return path_for(tree_id).exists()
+    return is_safe_id(tree_id) and path_for(tree_id).exists()
 
 
 def recent_trees(limit: int = 20) -> list[dict]:

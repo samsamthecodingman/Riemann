@@ -322,3 +322,25 @@ async def test_failed_build_is_retried_not_replayed(monkeypatch):
         assert second["tree_id"] == first and second["cached"] is False
         await build.get_builder(first).task
         assert build.get_builder(first).tree.status == "done"
+
+
+@pytest.mark.parametrize("bad", ["../x", "..", "a/b", "a\\b", "x.json", "", "a" * 65, "%2e%2e"])
+def test_tree_ids_that_could_be_paths_are_refused(bad, tmp_path):
+    from riemann.abstraction import cache
+
+    (tmp_path / "cache").mkdir(exist_ok=True)
+    (tmp_path / "x.json").write_text("{}")
+    assert cache.is_safe_id(bad) is False
+    assert cache.load_tree(bad) is None
+    assert cache.exists(bad) is False
+    with pytest.raises(ValueError):
+        cache.path_for(bad)
+
+
+async def test_tree_routes_answer_404_for_odd_ids():
+    async with await _client() as client:
+        for tid in ["x.json", "%2e%2e", "a" * 200]:
+            assert (await client.get(f"/api/tree/{tid}")).status_code == 404
+            assert (await client.post(f"/api/tree/{tid}/overview")).status_code == 404
+            assert (await client.post(f"/api/tree/{tid}/short-titles")).status_code == 404
+            assert (await client.get(f"/api/tree/{tid}/events")).status_code == 404
