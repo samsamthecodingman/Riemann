@@ -125,3 +125,73 @@ These were found by driving the app in headless Chromium against a scratch data 
 - Columns: drag and keyboard resize persist, re-clamp on window resize without writing to storage.
 - Check-in: low energy shortens the start depth and shows "Adjusted for: low energy" with a working undo; a check-in older than 4 hours is ignored and the panel shows "optional".
 - Not fixed, by design: the buttons Less and More are not disabled at the ends of the range (no harm), and the key `m` toggles minimal chrome.
+
+## 2026-10-01 (round 2): faithfulness checking, progressive disclosure, and how to tell if Riemann helps
+
+### R1. The number validator was defeatable, and it is the only deterministic grounding check (one part fixed)
+
+- **Claim:** Factual-consistency research treats "does every claim have support in the source" as its own task and finds no single cheap check sufficient. Sentence-level NLI (SummaC) works better than whole-document NLI, which wrongly predicted entailment with 0.91 probability when the whole document was the premise; QA-based checks (QAGS, QuestEval) add complexity for a small gain over NLI; decomposing into atomic facts (FActScore) is the fine-grained direction. Reported balanced accuracy for inconsistency detection sits around 60 to 75 percent on common benchmarks, so every method needs a cheap deterministic layer beside it. Errors in summaries are often only a few spans, which suits span-level checks on short values like essentials and key facts.
+- **Sources:** SummaC (https://www.researchgate.net/publication/358553684_SummaC_Re-Visiting_NLI-based_Models_for_Inconsistency_Detection_in_Summarization); QAGS (https://www.researchgate.net/publication/343298797_Asking_and_Answering_Questions_to_Evaluate_the_Factual_Consistency_of_Summaries); TRUE benchmark (https://arxiv.org/pdf/2204.04991); AlignScore (https://github.com/yuh-zha/AlignScore); long-document stress test (https://arxiv.org/html/2511.07689v1); practitioner survey of NLI, QA and sampling methods (https://eugeneyan.com/writing/abstractive/); span-level faithfulness (https://arxiv.org/html/2510.09915); Maynez et al., On faithfulness and factuality in abstractive summarisation (https://aclanthology.org/2020.acl-main.173.pdf).
+- **Riemann now:** `key_fact`, essentials and the overview sentence are checked by "every number-like token must appear in a cited leaf". The check used a substring test, so "5%" passed against a leaf that said "25%", and "20" against "2025". **Fixed** in commit `fd48fac` (whole-number match, thousands commas ignored); I re-ran it over the 164 numbers in the cached trees and none newly fail.
+- **Still not checked (measured, not just argued):** In the 12 essentials that carry cites in the cached trees, about 4 percent of longer words have no trace in the cited leaves, almost all harmless (a paraphrase such as "order" or "statement"). So a lexical grounding check has a low false-positive rate on this data, but the sample is small.
+  1. Weekday, month and other proper names: "due Monday" cited to a leaf that says "Friday" passes, because only digits are compared.
+  2. Negation and modality: "late work is accepted" against "is not accepted" passes; likewise "must" swapped for "may".
+  3. Number words: "twelve" is invisible to a digit check, so "12 pages" cited to "twelve pages" would be dropped while "13 pages" against "twelve pages" would also be dropped for the wrong reason.
+  4. Cites are only required to exist; a cite to a leaf that merely contains the digits satisfies the check. A leaf that shares a number is not evidence for the claim.
+  5. Titles, hooks, key points and every summary paragraph have no grounding check at all, only the prompt.
+- **Recommendation, in order of cost:**
+  1. (Small, safe) Add weekday and month names to the checked tokens, matching by 3-letter prefix and case, so "Fri" and "Friday" both satisfy "Friday". Log-only first, because "may" is both a month and a modal verb.
+  2. (Small) Check that each cited leaf actually shares content words with the essential (a lexical overlap floor). Drop the cite, not the item, when it fails.
+  3. (Medium) For essentials only (7 short strings per document), run one batched NLI or judge call per document: premise is the cited leaves, hypothesis is "label: value". Sentence-level premises, as the literature says, not whole documents. About 1 call per document, and it turns the "not stated" rule into a verified status.
+  4. (Larger) Surface it: show a subtle "source check" state on essentials that failed verification instead of silently dropping them, and let the `¶` link open the leaf. Sam's own log shows `hover_source` (144) and `jump_source` (5), so he does check sources sometimes.
+- **Effort/risk:** 1 and 2 small and low risk; 3 medium and needs a golden set to tune; 4 is a design change.
+
+### R2. Shneiderman's mantra maps onto Riemann almost one to one, and the gap is "filter"
+
+- **Claim:** The visual information-seeking mantra is overview first, zoom and filter, then details on demand. The full taxonomy has seven tasks: overview, zoom, filter, details-on-demand, relate, history and extract. The 2008 survey of interface strategies distinguishes overview plus detail (spatial separation), zooming (temporal separation) and focus plus context, and notes the tradeoffs: zooming loses the overview while you are zoomed, overview plus detail costs screen space and attention shifts.
+- **Sources:** Shneiderman, The Eyes Have It, 1996 (https://www.cs.umd.edu/~ben/papers/Shneiderman1996eyes.pdf); Cockburn, Karlson and Bederson, A Review of Overview+Detail, Zooming, and Focus+Context Interfaces, ACM Computing Surveys 2008 (https://dl.acm.org/doi/10.1145/1456650.1456652).
+- **Riemann against the seven tasks:**
+  - Overview: the overview card and gist. Present, and better than the plain data-visualisation case because it is written for the document kind.
+  - Zoom: the dial, Z-hold, Ctrl+wheel. Present. The map adds overview plus detail, so Riemann already combines the two strategies the survey compares.
+  - Details on demand: `¶` provenance links and the source text at the deepest level. Present.
+  - **Filter: absent.** There is no in-document search. Browser find (Ctrl+F) only sees what is currently expanded, so a word that lives in an unexpanded passage cannot be found. This is the largest gap in the mantra, and it matters for the "reference" goal ("look it up").
+  - Relate: partial. Cites link a summary to its leaves; nothing links two passages that mention the same thing.
+  - History: none for zoom. Back and Forward move between documents, not between depths. A "return to where I was before that zoom" is not there, and after a long Z drag it is the thing a reader wants.
+  - Extract: highlights exist but cannot be exported or copied out as a set.
+- **Recommendation:** (1) In-document search that looks through every leaf, ranks by node, and on selection calls `jumpToNode` (which already reveals the passage). Estimated one focused change. (2) A one-step "back to previous depth" (Alt+Left or a small button) that restores `z` and the anchor. (3) Copy highlights as markdown.
+- **Effort/risk:** (1) medium, new feature; (2) small-medium (state exists in `setZ`); (3) small. All three are features, so proposals only.
+
+### R3. Riemann is zoom-only where the literature says overview plus detail can be cheaper
+
+- **Claim:** Empirical work reviewed in the survey finds zooming carries a cost: when zoomed in, the overview is gone, so readers lose orientation and take longer on tasks needing both levels. Overview plus detail costs more screen space but keeps orientation.
+- **Riemann now:** Both exist: the section nav and the map are the overview, the reading column is the detail. The map is closed by default at the gist and by check-in on low energy. That default is a reasonable choice for an ADHD reader (fewer things on screen) but it means the orientation aid is one keypress (`g`) away that a new reader may never find.
+- **Recommendation:** Keep the default, but show the section nav's current-section highlight and "you are here" more strongly on a long jump, and mention `g` in the first-time hint once a reader has zoomed past level 3. No structural change.
+- **Effort/risk:** Small, low risk.
+
+### R4. How Sam could measure whether Riemann helps (methods, not a build)
+
+- **Claim:** For a single user, the standard method is a single-case experimental design: each participant is their own control, alternating baseline (A) and intervention (B) phases, and ABAB is the simplest design that shows an effect at least three times. Within-subject reading-tool studies typically pair objective measures (task time, comprehension accuracy) with a subjective load score (NASA-TLX, six 0 to 100 ratings).
+- **Sources:** N-of-1 trial (https://en.wikipedia.org/wiki/N-of-1_trial); single-case designs, practical guide (https://www.sciencedirect.com/science/article/pii/S1877065717304542); single-case designs for technology-based interventions (https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3636286/); NASA Task Load Index (https://www.nasa.gov/human-systems-integration-division/nasa-task-load-index-tlx/); example within-subject reading-tool study with time, accuracy and NASA-TLX (https://arxiv.org/pdf/2512.06408).
+- **What the existing log already gives:** Counts in `events.jsonl` today: 1,575 `dial`, 185 `dwell`, 144 `hover_source`, 66 `close`, 63 `open`, 37 `map`, 5 `jump_source`. That is enough for behaviour proxies (session length from open to close, deepest zoom per document, source checks per session) but not for outcomes: nothing measures whether Sam understood or acted on the document.
+- **Proposal (a two-week ABAB, about 30 minutes of setup):**
+  1. Pick one recurring task with a checkable outcome: a weekly assignment brief or reading. For each document, before reading, Sam writes down the three things he thinks he must do; after reading, a fixed 5-question checklist (what is due, what is worth what, what to submit, what is allowed, what is unclear) is scored against the source by hand (0 to 5).
+  2. Alternate by document, not by day: A = read the original as he normally would, B = read in Riemann. Four phases (A B A B) of about 3 documents each, order fixed in advance.
+  3. Record per document: minutes to first "I know what to do" (self-timed), checklist score, NASA-TLX raw score (six sliders, under a minute), and whether he later found he had missed something (a yes or no tick a week later). Riemann already logs the B-phase timing; the A phase is the one to add (a stopwatch is enough).
+  4. Judge it by the plotted phase data, not a p-value: did B beat A in both B phases, with the effect appearing again after the reversal.
+  5. Guard against the obvious confound: novelty. Run at least one B document late in the fortnight, after the novelty has faded.
+- **Cheap, automatic additions to the log, if Sam wants them** (all local, no progress or read marks): `first_zoom_ms` (time from open to first dial input), `max_z` per session (deepest level reached), and a `did_it_help` yes or no ask on close, which the existing "not helpful" link half-does.
+- **Effort/risk:** The protocol is paper and a spreadsheet; the three log fields are small. None of this adds progress or read state.
+
+### R5. Re-test with these lenses: what the two lenses changed in the QA list
+
+- Faithfulness lens found the substring bug (fixed, `fd48fac`), and pointed at the four gaps above, none built.
+- Shneiderman lens found no filter, no zoom history and no extract, and confirmed overview, zoom and details are present and work (word growth per step and pointer-pinned anchor measured in round 1; round 2 measured 41 ms median per zoom step on a 40,000-word tree).
+
+### Round 2 measurements (for the record)
+
+- **Large document (40,165 words, FakeSummariser, Chromium headless, 1366x768):** build 0.45 s; 650 nodes, 437 leaves; tree JSON 0.93 MB, served in 6 ms; reader opens in 147 to 156 ms; zoom step from first `=` to fully expanded (309 steps): median 41 ms, p90 72 ms, none over 150 ms; 20 full-screen scrolls in 331 ms. Map: opens in 29 to 39 ms with 16 to 40 tiles; at 649 tiles a wheel-zoom frame costs 37 ms median and 419 ms worst. That worst case is the frame that first draws all tiles and is acceptable; a virtualised draw would only matter above roughly 1,500 tiles.
+- **Leaks:** 50 map open/close cycles plus 100 `g` toggles, then 400 zoom steps, then 20 open/close-document cycles: JS heap 3.7 MB to 4.5 MB (flat after the first cycle), DOM nodes 1,278 to 1,402, native listener count 125 to 115 (no growth).
+- **Concurrency and restart:** two builds started together finish together (10.8 s each with a 1.2 s fake latency, 4 concurrent calls per build); closing the event stream mid-build and reopening replays the history and reaches "done"; the tree can also be fetched mid-build (`status: building`). A server restart mid-build loses the build: the loading screen shows "Lost the connection to the Riemann server", and reopening that link says "Could not find that document. It may have been built by an older version", which is misleading (it was in progress, not old). Proposal: persist a "building" marker or the source text so the reader can offer "Build it again".
+- **Contrast:** every text and background pair on the home page, reader, palette and map passes WCAG AA (lowest 4.66:1, muted text on the pastel tiles). With the palette set to Rose quartz slots (the lowest-contrast pastel, 3.98:1 for the label colour on the full pastel, 4.7:1 on the 60 percent tile mix) nothing fails in any surface the app draws; a custom palette that puts `--label` text on a full-strength Rose quartz block would fail.
+- **Keyboard:** Tab reaches every control on the home page, reader, palette and map in a sensible order with a visible focus indicator on each; every interactive element has an accessible name. Keyboard users cannot create a highlight (creation needs a mouse selection); that is a proposal, not a fix.
+- **Firefox:** Playwright's own Firefox was not installed and installing it downloads a large file, which I did not do without asking. The system Firefox 156 was driven over WebDriver BiDi instead: overview card (7 tiles), rail cards, zoom-word growth (503, 558, 617, 813, 977, 1045, 1249, 1289, 1336, the same sequence as Chromium), zoom out, map open (compact) and keyboard column resize with persistence all matched. WebKit was not tested.
