@@ -98,13 +98,13 @@ cd Riemann && uv sync
 macOS or Linux:
 
 ```bash
-RIEMANN_PROVIDER=agent-sdk uv run uvicorn riemann.server:app --port 8765
+RIEMANN_PROVIDER=agent-sdk uv run uvicorn riemann.server:app --host 127.0.0.1 --port 8765
 ```
 
 Windows (PowerShell):
 
 ```powershell
-$env:RIEMANN_PROVIDER="agent-sdk"; uv run uvicorn riemann.server:app --port 8765
+$env:RIEMANN_PROVIDER="agent-sdk"; uv run uvicorn riemann.server:app --host 127.0.0.1 --port 8765
 ```
 
 **4. Open <http://localhost:8765>**, paste some text and press **Build gist**.

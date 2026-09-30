@@ -4,7 +4,7 @@
     {
       "name": "riemann",
       "runtimeExecutable": "uv",
-      "runtimeArgs": ["run", "uvicorn", "riemann.server:app", "--port", "8765"],
+      "runtimeArgs": ["run", "uvicorn", "riemann.server:app", "--host", "127.0.0.1", "--port", "8765"],
       "port": 8765
     }
   ]
