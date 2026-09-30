@@ -317,7 +317,7 @@ Monkey tally at the end of round 3: 16 seeds of 500 actions (about 8,000 actions
 
 ## 2026-10-01 (round 4): browser tests, docs accuracy, code health, genre spot-check, and reading to start a task
 
-### E1. Opt-in browser test suite (`tests/e2e/`, commits `1f3a04d`, `ce4ecf3`-era follow-ups listed in git log)
+### E1. Opt-in browser test suite (`tests/e2e/`, commit `1f3a04d`)
 
 Runs Playwright (Node) against its own server on a free port with a scratch `RIEMANN_DATA_DIR` and a FakeSummariser (`tests/e2e/fake_app.py`), so it never touches Sam's cache or events log and never calls a model. Skipped unless `RIEMANN_E2E=1` is set, and skipped with a message if Node, the `playwright` npm package or a Chromium build is missing, so `uv run pytest` stays at about 7 seconds. Eleven tests (about 105 seconds together): word growth over 12 zoom steps; the pinned block drifts under 2 px through a Z-hold gesture; map open, tile jump and close; a column drag that survives a reload; a palette preset and a highlight that survive a reload; a poisoned `localStorage` (palette, highlights, position, columns, check-in) that runs nothing and still renders; an HTML payload in every text field of a built tree that stays escaped; the overview card with its essentials and no clamped value; a 390x844 layout with no horizontal overflow across eight zoom steps; and two seeded random-action runs (60 actions each) that assert no page or console errors, no horizontal overflow and a visible header. Negative control: with `app.js` swapped back to the version before the localStorage fix, the poisoned-storage test fails (`pwn: 1, imgs: 1, nodes: 0`) and passes on the current code.
 
