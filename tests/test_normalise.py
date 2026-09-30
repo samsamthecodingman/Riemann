@@ -259,3 +259,46 @@ def test_typographic_ligatures_are_expanded():
     out = normalise_text(src)
     assert out == "The classified, defined and flexible office staff suffix st st"
     assert normalise_text(out) == out
+
+
+EMAIL = """From: Dana Whitfield <dana@example.org>
+To: Sam Roberts <sam@example.com>
+Subject: Re: Placement start date
+Date: Wed, 15 Oct 2025 16:42
+
+Hi Sam,
+
+Thanks for getting back so quickly. Two things I need from you before I can lock this in. First, I need the signed placement agreement back by end of day Friday 24 October.
+
+On Tue, 14 Oct 2025 at 09:15, Sam Roberts <sam@example.com> wrote:
+> Hi Dana,
+>
+> Thanks for the details. I can start on 3 November as discussed, but I would need to leave at 3 pm on Thursdays for my lab class. Is that workable?
+> Also, do I need to bring my own laptop?
+>
+> Thanks,
+> Sam
+
+On Mon, 13 Oct 2025 at 14:20, Dana Whitfield <dana@example.org> wrote:
+>> Hi Sam,
+>>
+>> Great news, your placement has been approved. The start date is Monday 3 November, 9 am at the Northgate site.
+"""
+
+
+def test_email_headers_and_quoted_replies_keep_their_structure():
+    out = normalise_text(EMAIL)
+    # each header is its own paragraph, not one run-on line
+    assert "From: Dana Whitfield <dana@example.org>\n\nTo: Sam Roberts <sam@example.com>\n\nSubject: Re: Placement start date\n\nDate:" in out
+    # quoted lines stay on their own lines, with no ">" marker in the middle of a paragraph
+    assert "> Hi Dana,\n>\n> Thanks for the details." in out
+    assert "> Also, do I need to bring my own laptop?\n>\n> Thanks,\n> Sam" in out
+    assert ">> Hi Sam,\n>>\n>> Great news" in out
+    for line in out.split("\n"):
+        assert line.count(" > ") == 0 and " >> " not in line, line
+    assert normalise_text(out) == out
+
+
+def test_wrapped_prose_without_quotes_is_unchanged_by_the_quote_rule():
+    src = "A plain sentence that is long enough to matter.\nIt continues on a second line here."
+    assert normalise_text(src) == src

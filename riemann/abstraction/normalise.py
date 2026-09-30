@@ -246,6 +246,22 @@ def _rejoin_wrapped(lines: list[str]) -> str:
             close()
             prev = ""
             continue
+        if s.startswith(">"):
+            # A quoted reply (email, markdown blockquote): keep its own lines. Joining them
+            # put ">" markers in the middle of a paragraph.
+            if kind != "quote":
+                close()
+                kind = "quote"
+            cur.append(s)
+            prev = s
+            continue
+        if kind == "quote":
+            close()
+        if _EMAIL_HEADER_RE.match(s):
+            close()  # From:/To:/Subject: lines are separate facts, not a wrapped sentence
+            blocks.append(("p", [s]))
+            prev = s
+            continue
         nxt = next((x.strip() for x in lines[idx + 1:] if x.strip()), "")
         md_bullet = re.match(r"^\s*[-*+]\s+(?=\S)", s)
         glyph = _BULLET_LINE_RE.match(s)
@@ -294,7 +310,7 @@ def _rejoin_wrapped(lines: list[str]) -> str:
                 cur[-1] = _dehyphenate_join(cur[-1], s)
         prev = s
     close()
-    out = ["\n".join(items) if k == "list" else " ".join(items) for k, items in blocks]
+    out = ["\n".join(items) if k in ("list", "quote") else " ".join(items) for k, items in blocks]
     return "\n\n".join(x for x in out if x.strip())
 
 
@@ -314,6 +330,7 @@ def _normalise_bullets(text: str) -> str:
     return "\n".join(out)
 
 
+_EMAIL_HEADER_RE = re.compile(r"^(?:From|To|Cc|Bcc|Subject|Date|Sent|Reply-To):\s+\S", re.I)
 _LIST_ITEM_RE = re.compile(r"^(- |\d{1,3}\. )\S")
 
 

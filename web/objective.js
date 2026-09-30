@@ -1,7 +1,7 @@
 // Reader goal ("What's this for?"): the chip list and a cheap, local
 // heuristic that suggests one from a document's title, format and opening
 // text. No model call. Loaded before app.js; also require()able from node
-// (tests/test_objective_js.py).
+// (tests/test_objective.py).
 (function (root) {
   // Keys match research/ledger/objectives.json and build.OBJECTIVE_FOCUS.
   const OBJECTIVES = [
