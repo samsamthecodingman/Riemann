@@ -95,7 +95,13 @@ async def api_abstract(request: Request) -> dict:
     if cache.exists(tree_id):
         return {"tree_id": tree_id, "cached": True}
 
-    if build.get_builder(tree_id) is None:
+    existing = build.get_builder(tree_id)
+    if existing is not None and existing.tree.status == "error":
+        # A failed build must not be replayed forever: drop it so this
+        # request retries the same document.
+        build.BUILDS.pop(tree_id, None)
+        existing = None
+    if existing is None:
         summariser = get_summariser(model=model)
         builder = build.start_build(tree_id, title, text, summariser, objective=objective)
         builder.tree.model = model

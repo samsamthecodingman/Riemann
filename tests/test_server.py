@@ -298,3 +298,27 @@ async def test_abstract_rejects_wrongly_typed_bodies_with_400(body):
         r = await client.post("/api/abstract", json=body)
     assert r.status_code == 400
     assert not build.BUILDS
+
+
+async def test_failed_build_is_retried_not_replayed(monkeypatch):
+    import riemann.server as server_module
+
+    calls = {"n": 0}
+
+    class Flaky(FakeSummariser):
+        async def summarise(self, prompt, system):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("proxy down")
+            return await super().summarise(prompt, system)
+
+    monkeypatch.setattr(server_module, "get_summariser", lambda model=None: Flaky())
+    text = "A paragraph about ponds. " * 40
+    async with await _client() as client:
+        first = (await client.post("/api/abstract", json={"text": text})).json()["tree_id"]
+        await build.get_builder(first).task
+        assert build.get_builder(first).tree.status == "error"
+        second = (await client.post("/api/abstract", json={"text": text})).json()
+        assert second["tree_id"] == first and second["cached"] is False
+        await build.get_builder(first).task
+        assert build.get_builder(first).tree.status == "done"

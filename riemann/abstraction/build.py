@@ -690,7 +690,7 @@ async def _run_build(builder: TreeBuilder, summariser: Summariser) -> None:
         await _run_build_inner(builder, summariser)
     except Exception as exc:  # noqa: BLE001 - surfaced to clients via the error event
         tree.status = "error"
-        await builder._emit("error", {"message": str(exc)})
+        await builder._emit("error", {"message": str(exc) or type(exc).__name__})
 
 
 async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None:
