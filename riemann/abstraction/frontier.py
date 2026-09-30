@@ -50,31 +50,6 @@ import re
 from riemann.abstraction.model import Tree
 
 
-def _ancestor_depths(tree: Tree, node_id: str) -> dict[str, int]:
-    """id -> depth for node_id and all its ancestors, root included."""
-    out: dict[str, int] = {}
-    cur: str | None = node_id
-    while cur is not None:
-        out[cur] = tree.nodes[cur].depth
-        cur = tree.nodes[cur].parent
-    return out
-
-
-def hop_distance(tree: Tree, a: str, b: str) -> int:
-    """Tree-hop distance between two nodes, via their lowest common ancestor."""
-    if a == b:
-        return 0
-    a_ancestors = _ancestor_depths(tree, a)
-    cur: str | None = b
-    while cur is not None and cur not in a_ancestors:
-        cur = tree.nodes[cur].parent
-    if cur is None:
-        # Disconnected (shouldn't happen in a well-formed tree); treat as far.
-        return len(tree.nodes)
-    lca_depth = tree.nodes[cur].depth
-    return (tree.nodes[a].depth - lca_depth) + (tree.nodes[b].depth - lca_depth)
-
-
 def _mid(node) -> float:
     return (node.source_span[0] + node.source_span[1]) / 2
 
