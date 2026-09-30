@@ -16,10 +16,10 @@
   // [regex, weight]. Title hits count double (see suggestObjective).
   const RULES = {
     execute: [
-      [/\bassignments?\b/i, 3], [/\bdue\b/i, 2], [/\bmarks?\b/i, 2], [/\brubric\b/i, 3],
+      [/\bassignments?\b/i, 3], [/\bdue(?!\s+to\b)\b/i, 2], [/\bmarks\b|\b(?:final|total|your) mark\b|\bmarking\b/i, 2], [/\brubric\b/i, 3],
       [/\bsubmit\b|\bsubmission\b/i, 3], [/\bdeliverables?\b/i, 3], [/\bmarking criteria\b/i, 3],
       [/\bword limit\b|\bword count\b/i, 2], [/\bworth \d+\s*%|\b\d+\s*% of (?:your|the) (?:grade|mark|unit)/i, 3],
-      [/\bassessment task\b|\bproject brief\b|\bbrief\b/i, 2], [/\bmust (?:include|submit|complete)\b/i, 1],
+      [/\bassessment task\b|\b(?:project|assignment|task|assessment|design|creative) brief\b/i, 2], [/\bmust (?:include|submit|complete)\b/i, 1],
     ],
     communicate: [
       [/^(?:from|to|subject|cc|sent):/im, 3], [/^(?:hi|hello|hey|dear)\b[^\n]{0,40},/im, 3],

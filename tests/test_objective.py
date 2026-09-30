@@ -110,6 +110,9 @@ NODE = shutil.which("node")
         ("Product roadmap", "paste", "Milestones and timeline for Q4.", "plan"),
         ("Widget API reference", "url", "Documentation: parameters and returns.", "reference"),
         ("Shopping list", "paste", "milk eggs bread", None),
+        # "due to" and the name "Mark" are not deadlines and marks
+        ("Flooding hits the coast", "paste", "Mark Lee said delays were due to heavy rain, and the road closed due to floods.", None),
+        ("A Brief History of Time", "paste", "It was long.", None),
     ],
 )
 def test_suggest_objective_heuristic(title, format, text, expected):
