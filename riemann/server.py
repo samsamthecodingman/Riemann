@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -24,6 +25,44 @@ app = FastAPI(title="Riemann")
 
 # Each ~120 words is a model call or more; refuse a runaway paste up front.
 MAX_SOURCE_WORDS = 50_000
+# Request size limits: a pasted document is well under 1 MB; uploads are PDFs and Word files.
+MAX_JSON_BYTES = 5 * 1024 * 1024
+MAX_UPLOAD_BYTES = 30 * 1024 * 1024
+MAX_EVENTS_BYTES = 1024 * 1024
+
+def _allowed_hosts() -> set[str]:
+    extra = {h.strip().lower() for h in os.environ.get("RIEMANN_ALLOWED_HOSTS", "").split(",") if h.strip()}
+    return {"localhost", "127.0.0.1", "::1"} | extra
+
+
+def _host_of(value: str) -> str:
+    """Hostname of a Host header or an Origin URL, without port or brackets."""
+    value = value.strip().lower()
+    if "://" in value:
+        value = value.split("://", 1)[1].split("/", 1)[0]
+    if value.startswith("["):
+        return value[1:].split("]", 1)[0]
+    return value.rsplit(":", 1)[0] if value.count(":") == 1 else value
+
+
+@app.middleware("http")
+async def local_only_guard(request: Request, call_next):
+    """This is a personal app on localhost that spends the user's model quota
+    and reads their disk cache, so a web page open in another tab must not be
+    able to drive it: (1) the Host header must be a local name (defeats DNS
+    rebinding), (2) a state-changing request whose Origin is another site is
+    refused (defeats cross-site form posts and fetch)."""
+    allowed = _allowed_hosts()
+    if _host_of(request.headers.get("host", "")) not in allowed:
+        return Response("bad host", status_code=403)
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        origin = request.headers.get("origin")
+        if origin is not None and _host_of(origin) not in allowed:
+            return Response("cross-site request refused", status_code=403)
+        if request.headers.get("sec-fetch-site") == "cross-site":
+            return Response("cross-site request refused", status_code=403)
+    return await call_next(request)
+
 
 _OVERVIEW_TASKS: dict[str, asyncio.Future] = {}
 
@@ -36,7 +75,13 @@ async def api_abstract(request: Request) -> dict:
 
     model: str | None = None
     objective: str | None = None
+    declared = request.headers.get("content-length")
+    limit = MAX_UPLOAD_BYTES if content_type.startswith("multipart/form-data") else MAX_JSON_BYTES
+    if declared is not None and declared.isdigit() and int(declared) > limit:
+        raise HTTPException(413, f"that is too large; the limit is {limit // (1024 * 1024)} MB")
     if content_type.startswith("multipart/form-data"):
+        if declared is None:
+            raise HTTPException(411, "content-length is required for uploads")
         form = await request.form()
         model = form.get("model") or None
         objective = form.get("objective") or None
@@ -44,13 +89,22 @@ async def api_abstract(request: Request) -> dict:
         if upload is None:
             raise HTTPException(400, "expected a 'file' field")
         content = await upload.read()
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, f"that file is too large; the limit is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB")
         try:
             title, text = ingest.from_file(upload.filename or "upload", content)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
     else:
+        if not content_type.startswith("application/json"):
+            raise HTTPException(415, "content-type must be application/json")
+        raw = bytearray()
+        async for chunk in request.stream():
+            raw.extend(chunk)
+            if len(raw) > MAX_JSON_BYTES:
+                raise HTTPException(413, f"that is too large; the limit is {MAX_JSON_BYTES // (1024 * 1024)} MB")
         try:
-            body = await request.json()
+            body = json.loads(bytes(raw).decode("utf-8"))
         except ValueError:  # bad JSON or bad UTF-8
             raise HTTPException(400, "expected JSON body with 'text' or 'url'")
         if body is not None and not isinstance(body, dict):
@@ -208,8 +262,13 @@ async def api_tree_events(tree_id: str) -> EventSourceResponse:
 
 @app.post("/api/events", status_code=204)
 async def api_events(request: Request) -> Response:
+    if not request.headers.get("content-type", "").startswith("application/json"):
+        raise HTTPException(415, "content-type must be application/json")
+    raw = await request.body()
+    if len(raw) > MAX_EVENTS_BYTES:
+        raise HTTPException(413, "too many events at once")
     try:
-        body = await request.json()
+        body = json.loads(raw.decode("utf-8"))
     except ValueError:
         raise HTTPException(400, "expected a JSON array of events")
     if not isinstance(body, list) or not all(isinstance(e, dict) for e in body):
