@@ -2141,6 +2141,24 @@
   }
 
   el("loading-back").addEventListener("click", () => goHome());
+  el("loading-retry").addEventListener("click", async () => {
+    const m = location.hash.match(TREE_HASH);
+    if (!m) return;
+    const btn = el("loading-retry");
+    btn.disabled = true;
+    try {
+      const resp = await fetch(`/api/tree/${m[1]}/retry`, { method: "POST" });
+      if (!resp.ok) throw new Error("retry refused");
+      const tree = await (await fetch(`/api/tree/${m[1]}`)).json();
+      if (tree.status === "done") openTree(tree);
+      else showLoading(m[1], tree.title);
+    } catch (err) {
+      console.error(err);
+      el("loading-error-text").textContent = "Could not restart the build. Go back and build it again.";
+    } finally {
+      btn.disabled = false;
+    }
+  });
 
   // ---------------------------------------------------------------------
   // Routing: #/t/<tree id> is a document, anything else is the home page.
@@ -2187,7 +2205,6 @@
     const tree = await resp.json();
     document.title = `${tree.title || "Document"} · Riemann`;
     if (tree.status === "done") openTree(tree);
-    else if (tree.status === "error") throw new Error("That document's build failed. Try building it again.");
     else showLoading(tree.id, tree.title);
   }
 

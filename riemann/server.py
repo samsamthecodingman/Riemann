@@ -163,6 +163,25 @@ async def api_abstract(request: Request) -> dict:
     return {"tree_id": tree_id, "cached": False}
 
 
+@app.post("/api/tree/{tree_id}/retry")
+async def api_retry(tree_id: str) -> dict:
+    """Restart a build that failed, from the source and settings the failed one
+    had (the loading screen's "Try again"). Nothing to do for a build that is
+    running or finished, so a double press is harmless."""
+    builder = build.get_builder(tree_id)
+    if builder is None:
+        if cache.is_safe_id(tree_id) and cache.exists(tree_id):
+            return {"tree_id": tree_id}
+        raise HTTPException(404, "no such build")
+    if builder.tree.status == "error":
+        old = builder.tree
+        model = old.model or default_model()
+        build.BUILDS.pop(tree_id, None)
+        fresh = build.start_build(tree_id, old.title, old.source_text, get_summariser(model=model), objective=old.objective)
+        fresh.tree.model = model
+    return {"tree_id": tree_id}
+
+
 @app.get("/api/tree/{tree_id}")
 async def api_tree(tree_id: str) -> dict:
     builder = build.get_builder(tree_id)

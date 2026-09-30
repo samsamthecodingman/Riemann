@@ -13,6 +13,7 @@ CHECKS = [
     "xss_payload_in_tree_text_is_escaped",
     "overview_card_renders",
     "phone_layout_no_overflow",
+    "failed_build_shows_message_and_retries",
 ]
 
 

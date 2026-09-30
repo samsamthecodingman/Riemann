@@ -216,6 +216,26 @@ const checks = {
     return { ok: r.card && r.essentials >= 3 && r.labelled && !r.clamped, ...r };
   },
 
+  async failed_build_shows_message_and_retries(page) {
+    const text = "FAILME-ONCE " + Array.from({ length: 60 }, (_, i) => `Sentence ${i} about the harbour and its tides.`).join(" ")
+      + "\n\n" + Array.from({ length: 60 }, (_, i) => `Another ${i} point about the survey boats.`).join(" ");
+    await page.goto(BASE + "/");
+    const id = await page.evaluate(async (t) => {
+      const r = await fetch("/api/abstract", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: t }) });
+      return (await r.json()).tree_id;
+    }, text);
+    await page.goto(`${BASE}/#/t/${id}`);
+    await page.waitForSelector("#loading-error:not([hidden])", { timeout: 10000 });
+    const msg = await page.innerText("#loading-error-text");
+    const heading = await page.innerText("#loading-heading");
+    // Reload on the failed build: still the same panel, not a dead end.
+    await page.reload();
+    await page.waitForSelector("#loading-error:not([hidden])", { timeout: 10000 });
+    await page.click("#loading-retry");
+    await page.waitForSelector("#content .node, .root-hero", { timeout: 15000 });
+    return { ok: /rate-limiting/.test(msg) && heading === "The build stopped", msg, heading };
+  },
+
   async phone_layout_no_overflow(page) {
     await page.setViewportSize({ width: 390, height: 844 });
     await openReader(page);

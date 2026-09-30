@@ -324,6 +324,35 @@ async def test_failed_build_is_retried_not_replayed(monkeypatch):
         assert build.get_builder(first).tree.status == "done"
 
 
+async def test_retry_route_restarts_a_failed_build_with_the_same_source(monkeypatch):
+    import riemann.server as server_module
+
+    calls = {"n": 0}
+
+    class Flaky(FakeSummariser):
+        async def summarise(self, prompt, system):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("proxy down")
+            return await super().summarise(prompt, system)
+
+    monkeypatch.setattr(server_module, "get_summariser", lambda model=None: Flaky())
+    text = "A paragraph about ponds. " * 40
+    async with await _client() as client:
+        tid = (await client.post("/api/abstract", json={"text": text, "objective": "learn"})).json()["tree_id"]
+        await build.get_builder(tid).task
+        assert build.get_builder(tid).tree.status == "error"
+        r = await client.post(f"/api/tree/{tid}/retry")
+        assert r.status_code == 200 and r.json() == {"tree_id": tid}
+        await build.get_builder(tid).task
+        tree = build.get_builder(tid).tree
+        assert tree.status == "done" and tree.objective == "learn"
+        # A second press while it is not failed changes nothing.
+        again = await client.post(f"/api/tree/{tid}/retry")
+        assert again.status_code == 200
+        assert (await client.post("/api/tree/0123456789abcdef/retry")).status_code == 404
+
+
 @pytest.mark.parametrize("bad", ["../x", "..", "a/b", "a\\b", "x.json", "", "a" * 65, "%2e%2e"])
 def test_tree_ids_that_could_be_paths_are_refused(bad, tmp_path):
     from riemann.abstraction import cache

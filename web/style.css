@@ -683,6 +683,12 @@ kbd {
   margin: 0;
 }
 
+.loading-error .loading-error-note {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0.4rem 0 0.8rem;
+}
+
 .loading-actions {
   margin-top: 1rem;
 }
