@@ -1917,7 +1917,7 @@
   // content, so the page is re-rendered with the reading position held.
   const overviewTried = new Set();
   function ensureOverview(tree) {
-    if (tree.overview || tree.status !== "done" || overviewTried.has(tree.id)) return;
+    if (IS_FIXTURE || tree.overview || tree.status !== "done" || overviewTried.has(tree.id)) return;
     const rootNode = tree.nodes[tree.root];
     if (!rootNode || rootNode.is_leaf) return;
     overviewTried.add(tree.id);
