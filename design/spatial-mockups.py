@@ -68,7 +68,7 @@ def nn(n):
 
 # ---------------------------------------------------------------- shared chrome
 def header():
-    return f"""<header style="grid-column: 1 / 4; display: flex; align-items: center; gap: 18px; padding: 0 32px; background: {PANEL}; border-bottom: 1px solid {BORDER}">
+    return f"""<header style="grid-column: 1 / -1; display: flex; align-items: center; gap: 18px; padding: 0 32px; background: {PANEL}; border-bottom: 1px solid {BORDER}">
 <button type="button" aria-label="Home page" style="width: 44px; height: 44px; border-radius: 12px; border: 1px solid {BORDER}; background: {CHIP}; color: {INK}; font-size: 18px">⌂</button>
 <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0; max-width: 620px">
 <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: {LABEL}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{e(DOC_TITLE)}</span>
