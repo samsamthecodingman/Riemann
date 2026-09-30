@@ -1449,6 +1449,9 @@ button.source-link:focus-visible .source-link-more {
   /* minmax(0, ...): a bare 1fr lets the header's min-content widen the page on a phone. */
   grid-template-columns: minmax(0, 1fr);
 }
+#app.no-sections #content {
+  grid-column: 1; /* the only column: an implicit second one collapses under the reader container */
+}
 #app.no-sections #section-nav,
 #app.no-sections #rail {
   display: none;
