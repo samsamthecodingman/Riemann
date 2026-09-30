@@ -187,10 +187,20 @@
 
   const savePositionDebounced = debounce(savePosition, 400);
 
+  // Anything read back from localStorage is untrusted (another tool, a
+  // corrupted write, a hand edit): validate its shape before it reaches the
+  // DOM or the zoom maths.
+  const isHexColour = (v) => typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v);
+
   function loadPosition(treeId) {
     try {
       const raw = localStorage.getItem(posKey(treeId));
-      return raw ? JSON.parse(raw) : null;
+      const p = raw ? JSON.parse(raw) : null;
+      if (!p || typeof p !== "object") return null;
+      if (typeof p.z !== "number" || !isFinite(p.z)) return null;
+      if (p.anchor_node_id != null && typeof p.anchor_node_id !== "string") return null;
+      if (p.anchor_offset != null && !(typeof p.anchor_offset === "number" && isFinite(p.anchor_offset))) return null;
+      return p;
     } catch (e) {
       return null;
     }
@@ -209,8 +219,9 @@
       const raw = localStorage.getItem("riemann:palette");
       if (raw) {
         const p = JSON.parse(raw);
-        if (p && Array.isArray(p.sections) && p.sections.length === 5 && p.hl) {
-          return { sections: p.sections, hl: p.hl, preset: p.preset || null };
+        if (p && Array.isArray(p.sections) && p.sections.length === 5 && p.sections.every(isHexColour) && isHexColour(p.hl)) {
+          const known = PRESETS.some((x) => x.name === p.preset);
+          return { sections: p.sections.slice(), hl: p.hl, preset: known ? p.preset : null };
         }
       }
     } catch (e) {}
@@ -237,7 +248,13 @@
   function loadHighlights(treeId) {
     try {
       const raw = localStorage.getItem(hlStorageKey(treeId));
-      return raw ? JSON.parse(raw) : [];
+      const list = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(list)) return [];
+      return list.filter(
+        (h) =>
+          h && typeof h === "object" && typeof h.id === "string" && /^[\w-]{1,40}$/.test(h.id) &&
+          typeof h.nodeId === "string" && Number.isFinite(h.start) && Number.isFinite(h.end) && h.end > h.start && isHexColour(h.colour)
+      );
     } catch (e) {
       return [];
     }
