@@ -470,3 +470,33 @@ def test_essential_with_a_number_only_inside_a_longer_number_is_dropped():
         {"l1"},
     )
     assert [e.label for e in out] == ["Weight2"]
+
+
+def test_a_lone_title_heading_does_not_hide_the_section_boundaries():
+    from riemann.abstraction.build import section_boundary_keys
+
+    title = ("Meeting",)
+    paths = [title, title + ("1. Data",), title + ("1. Data",), title + ("2. Budget",), title + ("2. Budget", "Quotes"), title + ("Actions",)]
+    keys = section_boundary_keys(paths)
+    assert keys[0] == title  # the preamble before the first section
+    assert keys[1] == keys[2] == title + ("1. Data",)
+    assert keys[3] == keys[4] == title + ("2. Budget",)  # a ### inside a section is not a boundary
+    assert keys[5] == title + ("Actions",)
+    assert len({keys[0], keys[1], keys[3], keys[5]}) == 4
+
+
+def test_section_boundary_keys_keep_the_old_behaviour_without_a_shared_title():
+    from riemann.abstraction.build import section_boundary_keys
+
+    paths = [(), ("A",), ("A", "x"), ("B",), ("B", "y")]
+    assert section_boundary_keys(paths) == [None, ("A",), ("A",), ("B",), ("B",)]
+    assert section_boundary_keys([("Only",), ("Only",)]) == [("Only",), ("Only",)]
+    assert section_boundary_keys([]) == []
+
+
+async def test_title_plus_h2_sections_become_separate_sections_in_a_built_tree():
+    text = "# Notes\n\n" + "\n\n".join(f"## Topic {i}\n\n" + ("Words about topic %d go here. " % i) * 30 for i in range(4))
+    builder = start_build("h2doc", "Notes", text, FakeSummariser())
+    await builder.task
+    tree = builder.tree
+    assert len(tree.sections) >= 4, len(tree.sections)

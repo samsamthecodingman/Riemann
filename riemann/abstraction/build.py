@@ -194,7 +194,19 @@ def _group_run(ids: list[str]) -> list[list[str]]:
     return groups
 
 
-def _group_leaves(ids: list[str], boundary_keys: dict[str, str | None]) -> list[list[str]]:
+def section_boundary_keys(paths: list[tuple[str, ...]]) -> list[tuple[str, ...] | None]:
+    """The heading that separates sections, per leaf. Normally the top-level
+    heading; but a document with one title (`# Title`) over `##` sections has
+    the same first heading on every leaf, which made every boundary useless, so
+    a shared leading heading is skipped and the first one that varies is used
+    (`# Meeting notes` > `## 1. Data`, `## 2. Budget` ... split at the `##`)."""
+    k = 0
+    while paths and all(len(p) > k for p in paths) and len({p[k] for p in paths}) == 1:
+        k += 1
+    return [p[: k + 1] if p else None for p in paths]
+
+
+def _group_leaves(ids: list[str], boundary_keys: dict[str, tuple[str, ...] | None]) -> list[list[str]]:
     """Group leaves into siblings, respecting top-level heading boundaries.
     (Boundary-respecting grouping only applies at the leaf level -- once a
     section has its own summary node, higher rounds group freely, which is
@@ -746,8 +758,9 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
     nodes: dict[str, Node] = {}
     counter = [0]
     leaf_ids: list[str] = []
-    boundary_keys: dict[str, str | None] = {}
-    for leaf in leaves:
+    boundary_keys: dict[str, tuple[str, ...] | None] = {}
+    keys = section_boundary_keys([leaf.heading_path for leaf in leaves])
+    for leaf, key in zip(leaves, keys):
         nid = _new_id(counter, leaf.source_span)
         node = Node(
             id=nid,
@@ -764,7 +777,7 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
         )
         nodes[nid] = node
         leaf_ids.append(nid)
-        boundary_keys[nid] = leaf.heading_path[0] if leaf.heading_path else None
+        boundary_keys[nid] = key
 
     tree.nodes = nodes
     await builder._emit(
