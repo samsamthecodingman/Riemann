@@ -312,3 +312,5 @@ Found and fixed: minimal chrome (`m`) only faded the header, nav, rail and colum
 
 - Chunking lens found the table splitter (fixed), the ligature gap (fixed) and the mid-sentence cuts (measured, proposed).
 - Typography lens found the 9 and 24 characters-per-line cases (the first fixed) and confirmed there is no per-word emphasis, no decorative font and no motion that the evidence argues against; the reduced-motion rule from round 1 stands.
+
+Monkey tally at the end of round 3: 16 seeds of 500 actions (about 8,000 actions) over five cached documents, including one single-column document and the poisoned XSS tree; every seed passes on the final code (seeds 1, 3, 4, 5, 6, 8, 9, 10, 11 to 16 clean; seeds 2, 4 and 7 each found something that is now fixed and were re-run clean).
