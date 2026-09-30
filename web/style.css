@@ -1831,7 +1831,9 @@ body.minimal-chrome #content {
   display: none;
   align-items: center;
   gap: 0.75rem;
-  max-width: min(90vw, 52ch);
+  /* left:50% shrinks an auto-width box to half the viewport; ask for max-content. */
+  width: max-content;
+  max-width: min(calc(100vw - 32px), 52ch);
 }
 
 #resume-card.visible {
