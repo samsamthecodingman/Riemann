@@ -791,9 +791,10 @@
       const heading = overview
         ? `<span class="hero-kicker">THE GIST</span>`
         : `<h1>${escapeHtml(nodeTitle(root) || tree.title || "")}</h1>`;
-      return `${overview}<div class="root-hero${overview ? " has-overview" : ""}">${heading}<p>${escapeHtml(
-        root.hook || root.text || ""
-      )}</p></div>`;
+      // A document short enough to be a single leaf has no summary: show its
+      // own text, rendered as markdown like every other leaf.
+      const body = !root.hook && root.is_leaf && root.text ? `<div class="node-body">${renderMarkdown(root.text)}</div>` : `<p>${escapeHtml(root.hook || root.text || "")}</p>`;
+      return `${overview}<div class="root-hero${overview ? " has-overview" : ""}">${heading}${body}</div>`;
     }
     const groups = groupFrontierBySections(tree, frontier);
     return overview + groups.map((g) => renderSectionGroupHTML(tree, g)).join("");
