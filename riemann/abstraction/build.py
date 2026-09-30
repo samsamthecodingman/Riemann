@@ -422,6 +422,23 @@ def _number_tokens(text: str) -> list[str]:
     return _NUMBER_TOKEN_RE.findall(text or "")
 
 
+def _strip_thousands(s: str) -> str:
+    return re.sub(r"(?<=\d),(?=\d{3}(?!\d))", "", s)
+
+
+def _number_in_source(token: str, source_lower: str) -> bool:
+    """Is this number token in the source as a whole number? A plain substring
+    test let "5" pass against "25%" and "20" against "2025"; a match must not
+    start or end inside a longer number. Thousands commas are ignored."""
+    tok = token.lower().rstrip(".,")
+    if not tok:
+        return True
+    if not tok[0].isdigit():  # "billion", "million"
+        return re.search(rf"\b{re.escape(tok)}\b", source_lower) is not None
+    pattern = r"(?<![\d.,])" + re.escape(_strip_thousands(tok)) + r"(?!\d|[.,]\d)"
+    return re.search(pattern, _strip_thousands(source_lower)) is not None
+
+
 def _prose_numbers(text: str) -> list[str]:
     """Number-like tokens of a sentence, minus the sentence punctuation the
     token regex swallows ("2," "2025." -> "2" "2025")."""
@@ -445,7 +462,7 @@ def _validate_key_fact(raw: object, nodes: dict[str, Node], leaf_ctx_ids: list[s
     source_text = " ".join(nodes[c].text for c in cites if c in nodes).lower()
 
     for token in _number_tokens(big) + _number_tokens(detail):
-        if token.lower() not in source_text:
+        if not _number_in_source(token, source_text):
             return None
 
     return KeyFact(big=big, detail=detail, cites=cites)
@@ -583,7 +600,7 @@ def _clean_essentials(raw: object, nodes: dict[str, Node], all_leaf_ids: set[str
         cites_raw = item.get("cites")
         cites = [c for c in cites_raw if isinstance(c, str) and c in all_leaf_ids] if isinstance(cites_raw, list) else []
         source = " ".join(nodes[c].text for c in cites).lower()
-        if any(tok.lower() not in source for tok in _prose_numbers(value)):
+        if any(not _number_in_source(tok, source) for tok in _prose_numbers(value)):
             continue
         seen.add(label.lower())
         out.append(Essential(label=label, value=value, cites=cites))
@@ -603,7 +620,7 @@ def _clean_overview(raw: object, tree: Tree) -> Overview | None:
     doc_title = _truncate_words(doc_title.strip(), OVERVIEW_TITLE_MAX_WORDS)
     doc_kind = _truncate_words(doc_kind.strip().rstrip("."), OVERVIEW_KIND_MAX_WORDS)
     source_lower = tree.source_text.lower()
-    what_ok = isinstance(what, str) and what.strip() and all(t.lower() in source_lower for t in _prose_numbers(what))
+    what_ok = isinstance(what, str) and what.strip() and all(_number_in_source(t, source_lower) for t in _prose_numbers(what))
     if what_ok:
         what = _truncate_words(what.strip(), OVERVIEW_WHAT_MAX_WORDS)
     else:

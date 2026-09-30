@@ -444,3 +444,29 @@ def test_over_long_titles_do_not_end_on_a_dangling_word_or_number():
     assert _truncate_title("Marks are split across the five criteria and the of") == "Marks are split across the five criteria"
     assert _truncate_title("Short title here") == "Short title here"
     assert _truncate_title("one two three four five six seven eight nine") == "one two three four five six seven eight"
+
+
+def test_numbers_must_match_whole_numbers_not_substrings():
+    from riemann.abstraction.build import _number_in_source as ok
+
+    src = "worth 25% of the mark; due in 2025; scores of 10.5 and 1,000 words".lower()
+    assert ok("25", src) and ok("2025", src) and ok("10.5", src) and ok("1000", src) and ok("1,000", src)
+    assert not ok("5", src)  # inside 25 and 2025
+    assert not ok("20", src)  # inside 2025
+    assert not ok("0.5", src)  # inside 10.5
+    assert not ok("100", src)  # inside 1,000
+    assert ok("2025.", src)  # sentence punctuation is ignored
+    assert ok("billion", "about a billion people") and not ok("million", "millions of people")
+
+
+def test_essential_with_a_number_only_inside_a_longer_number_is_dropped():
+    from riemann.abstraction.build import _clean_essentials
+    from riemann.abstraction.model import Node
+
+    leaf = Node(id="l1", depth=0, text="This task is worth 25% of your final mark.", source_span=(0, 40), is_leaf=True, words=9)
+    out = _clean_essentials(
+        [{"label": "Weight", "value": "5% of your mark", "cites": ["l1"]}, {"label": "Weight2", "value": "25% of your mark", "cites": ["l1"]}],
+        {"l1": leaf},
+        {"l1"},
+    )
+    assert [e.label for e in out] == ["Weight2"]
