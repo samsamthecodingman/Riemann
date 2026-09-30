@@ -43,8 +43,15 @@ def from_text(text: str, title: str | None = None) -> tuple[str, str]:
 def from_file(filename: str, content: bytes) -> tuple[str, str]:
     """A .md/.txt/.pdf upload."""
     lower = filename.lower()
-    if lower.endswith(".pdf"):
-        return _from_pdf(filename, content)
+    if lower.endswith(".pdf") or content[:5] == b"%PDF-":
+        try:
+            return _from_pdf(filename, content)
+        except Exception as exc:  # noqa: BLE001 - corrupt/encrypted PDF
+            raise ValueError(f"could not read that PDF ({type(exc).__name__})") from exc
+    if lower.endswith(".docx"):
+        return _from_docx(filename, content)
+    if content[:4] == b"PK\x03\x04" or b"\x00" in content[:4096]:
+        raise ValueError("that file type is not supported; use .pdf, .docx, .md or .txt")
     # .md / .txt / anything else: decode as text
     text = normalise_text(content.decode("utf-8", errors="replace"))
     title = _title_from_text(text, filename)
@@ -61,6 +68,87 @@ def _from_pdf(filename: str, content: bytes) -> tuple[str, str]:
         if page_text.strip():
             parts.append(page_text.strip())
     text = normalise_text("\n\n".join(parts))
+    title = _title_from_text(text, filename)
+    return (title, text)
+
+
+_W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
+def _docx_paragraph_text(p) -> str:
+    out: list[str] = []
+    for el in p.iter():
+        if el.tag == _W + "t":
+            out.append(el.text or "")
+        elif el.tag == _W + "tab":
+            out.append(" ")
+        elif el.tag in (_W + "br", _W + "cr"):
+            out.append("\n")
+    return "".join(out).strip()
+
+
+def _docx_blocks(parent, lines: list[str]) -> None:
+    for el in parent:
+        if el.tag == _W + "p":
+            text = _docx_paragraph_text(el)
+            if not text:
+                lines.append("")
+                continue
+            ppr = el.find(_W + "pPr")
+            style = ""
+            is_list = False
+            if ppr is not None:
+                st = ppr.find(_W + "pStyle")
+                if st is not None:
+                    style = (st.get(_W + "val") or "").lower()
+                is_list = ppr.find(_W + "numPr") is not None
+            m = re.match(r"heading\s*(\d)", style)
+            if style == "title":
+                lines.append(f"# {text}")
+            elif m:
+                lines.append(f"{'#' * min(int(m.group(1)), 6)} {text}")
+            elif is_list or style.startswith("listparagraph"):
+                lines.append(f"- {text}")
+            else:
+                lines.append(text)
+        elif el.tag == _W + "tbl":
+            for row in el.iter(_W + "tr"):
+                cells = []
+                for cell in row.findall(_W + "tc"):
+                    cells.append(" ".join(_docx_paragraph_text(p) for p in cell.iter(_W + "p")).strip())
+                if any(cells):
+                    lines.append("- " + " | ".join(c for c in cells if c))
+            lines.append("")
+        elif el.tag in (_W + "sdt", _W + "sdtContent", _W + "body"):
+            _docx_blocks(el, lines)
+
+
+def _from_docx(filename: str, content: bytes) -> tuple[str, str]:
+    """A .docx upload, read with the standard library only (zip + XML):
+    headings, list items, paragraphs and table rows, in document order."""
+    import zipfile
+    from xml.etree import ElementTree
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as z:
+            root = ElementTree.fromstring(z.read("word/document.xml"))
+    except Exception as exc:  # noqa: BLE001 - not a real docx
+        raise ValueError("could not read that Word file; is it a .docx?") from exc
+    body = root.find(_W + "body")
+    lines: list[str] = []
+    _docx_blocks(body if body is not None else root, lines)
+    # One blank line between blocks; consecutive list items stay together.
+    out: list[str] = []
+    prev_list = False
+    for ln in lines:
+        if not ln:
+            continue
+        is_list = ln.startswith("- ")
+        if out and not (is_list and prev_list):
+            out.append("")
+        out.append(ln)
+        prev_list = is_list
+    text = normalise_text("\n".join(out))
     title = _title_from_text(text, filename)
     return (title, text)
 

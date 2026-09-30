@@ -41,7 +41,10 @@ async def api_abstract(request: Request) -> dict:
         if upload is None:
             raise HTTPException(400, "expected a 'file' field")
         content = await upload.read()
-        title, text = ingest.from_file(upload.filename or "upload", content)
+        try:
+            title, text = ingest.from_file(upload.filename or "upload", content)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
     else:
         try:
             body = await request.json()

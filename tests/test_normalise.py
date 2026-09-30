@@ -126,3 +126,50 @@ def test_ingest_applies_normalisation_to_text_files_and_urls():
     assert "\n\n- the quality" in text and " \n" not in text
     _, ftext = ingest.from_file("brief.txt", _word_per_line().encode())
     assert ftext == text
+
+
+def _make_docx(body_xml: str) -> bytes:
+    import io
+    import zipfile
+
+    ns = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+    doc = f'<?xml version="1.0"?><w:document {ns}><w:body>{body_xml}</w:body></w:document>'
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("word/document.xml", doc)
+    return buf.getvalue()
+
+
+def test_docx_headings_lists_and_tables():
+    def p(text, style=None, num=False):
+        ppr = ""
+        if style or num:
+            ppr = "<w:pPr>" + (f'<w:pStyle w:val="{style}"/>' if style else "") + ("<w:numPr/>" if num else "") + "</w:pPr>"
+        return f"<w:p>{ppr}<w:r><w:t>{text}</w:t></w:r></w:p>"
+
+    body = (
+        p("Assignment 1", "Title")
+        + p("Deliverables", "Heading1")
+        + p("Submit a report.")
+        + p("one", num=True)
+        + p("two", num=True)
+        + "<w:tbl><w:tr><w:tc>" + p("Due") + "</w:tc><w:tc>" + p("Friday") + "</w:tc></w:tr></w:tbl>"
+    )
+    title, text = ingest.from_file("brief.docx", _make_docx(body))
+    assert title == "Assignment 1"
+    assert "# Deliverables" in text
+    assert "Submit a report." in text
+    assert "- one\n- two" in text
+    assert "- Due | Friday" in text
+
+
+def test_binary_and_corrupt_uploads_are_refused_not_decoded():
+    import pytest
+
+    with pytest.raises(ValueError):
+        ingest.from_file("x.docx", b"not a zip")
+    with pytest.raises(ValueError):
+        ingest.from_file("x.xlsx", b"PK\x03\x04junk")
+    with pytest.raises(ValueError):
+        ingest.from_file("x.pdf", b"%PDF-1.4 broken")
+    assert ingest.from_file("n.txt", b"hello world")[1] == "hello world"
