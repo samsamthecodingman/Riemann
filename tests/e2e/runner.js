@@ -448,6 +448,61 @@ const checks = {
     return { ok: /of \d+/.test(n) && seen.size === 12 && state.overflow <= 0, n, seen: seen.size, state };
   },
 
+  async zoom_history_alt_arrows_restore_level_and_position(page) {
+    const id = await buildText(longDoc());
+    await openReader(page, id);
+    const snap = () =>
+      page.evaluate(() => ({
+        page: [...document.querySelectorAll("#content [data-node-id]")].map((n) => n.dataset.nodeId + ":" + n.dataset.form).join(","),
+        y: Math.round(scrollY),
+        back: !document.querySelector("#hist-back").hidden,
+        hash: location.hash,
+      }));
+    const s0 = await snap();
+    for (let i = 0; i < 6; i++) {
+      await page.keyboard.press("=");
+      await page.waitForTimeout(120);
+    }
+    await page.waitForTimeout(1300);
+    const s1 = await snap(); // six steps in one gesture: one entry, and a big jump (>= 3 steps)
+    const backShown = s1.back;
+    await page.click(".nav-item >> nth=3");
+    await page.waitForTimeout(1500);
+    const s2 = await snap();
+    await page.keyboard.press("Alt+ArrowLeft");
+    await page.waitForTimeout(500);
+    const b1 = await snap();
+    await page.keyboard.press("Alt+ArrowLeft");
+    await page.waitForTimeout(500);
+    const b2 = await snap();
+    await page.keyboard.press("Alt+ArrowRight");
+    await page.waitForTimeout(500);
+    const f1 = await snap();
+    await page.keyboard.press("Alt+ArrowRight");
+    await page.waitForTimeout(500);
+    const f2 = await snap(); // the section jump: same level, same place down the page
+    // hash routing still follows the browser's own Back: home, then Back returns to the document
+    await page.click("#home-btn");
+    await page.waitForTimeout(300);
+    const home = await page.evaluate(() => getComputedStyle(document.querySelector("#start-screen")).display !== "none");
+    await page.goBack();
+    await page.waitForSelector("#content .node, .root-hero", { timeout: 8000 });
+    // the back button goes away by itself
+    await page.keyboard.press("Home"); // focus is on the page: use the pill instead
+    for (let i = 0; i < 8; i++) {
+      await page.keyboard.press("-");
+      await page.waitForTimeout(90);
+    }
+    await page.waitForTimeout(1200);
+    const shown = await page.evaluate(() => !document.querySelector("#hist-back").hidden);
+    await page.waitForTimeout(6500);
+    const gone = await page.evaluate(() => document.querySelector("#hist-back").hidden);
+    const ok =
+      backShown && s2.y > s1.y + 500 && b1.page === s1.page && b2.page === s0.page &&
+      Math.abs(b2.y - s0.y) < 40 && f1.page === s1.page && Math.abs(f2.y - s2.y) < 80 && b1.hash === s0.hash && home && shown && gone;
+    return { ok, backShown, same: { b1: b1.page === s1.page, b2: b2.page === s0.page, f1: f1.page === s1.page }, y: [s0.y, s1.y, s2.y, b1.y, b2.y, f1.y, f2.y], home, shown, gone };
+  },
+
   async failed_build_shows_message_and_retries(page) {
     const text = "FAILME-ONCE " + Array.from({ length: 60 }, (_, i) => `Sentence ${i} about the harbour and its tides.`).join(" ")
       + "\n\n" + Array.from({ length: 60 }, (_, i) => `Another ${i} point about the survey boats.`).join(" ");

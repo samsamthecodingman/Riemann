@@ -1737,6 +1737,7 @@
     const total = Math.max(1, state.sequence.length);
     setZ(state.z + deltaSteps / total, inputType, anchorY);
     endPin(900);
+    recordHistory("zoom");
   }
 
   // The pill's Less/More buttons step at the viewport-centre anchor,
@@ -1749,6 +1750,7 @@
     const total = Math.max(1, state.sequence.length);
     setZ(state.z + deltaSteps / total, "key", anchorY);
     endPin(900);
+    recordHistory("zoom");
   }
   el("zoom-less").addEventListener("click", () => stepAtViewportCentre(-1));
   el("zoom-more").addEventListener("click", () => stepAtViewportCentre(1));
@@ -1857,6 +1859,7 @@
     zGestureY = null;
     clearTimeout(zIdleTimer);
     endPin(350);
+    recordHistory("zoom");
     document.body.classList.remove("zoom-drag-active");
     if ($zoomMode) $zoomMode.hidden = true;
     window.removeEventListener("mousemove", zMoveHandler);
@@ -1919,6 +1922,7 @@
       wheelBurstTimer = setTimeout(() => {
         wheelBurstActive = false;
         endPin(350);
+        recordHistory("zoom");
       }, 250);
 
       const magnitude = Math.abs(e.deltaY);
@@ -2025,6 +2029,7 @@
     }
     updateNavCurrent();
     updateRail();
+    recordHistory("jump");
   }
 
   function firstRenderedDescendant(nodeId) {
@@ -2035,6 +2040,184 @@
     }
     return null;
   }
+
+  // ---------------------------------------------------------------------
+  // Zoom history: Alt+Left goes back to the previous zoom level AND position (the page
+  // as it was: what is open and in which form, the anchor passage and where it sat on
+  // screen); Alt+Right goes forward. An entry is taken at the end of each zoom gesture,
+  // section jump, search jump and map jump; entries within about a second merge. After
+  // a big jump (3 or more zoom steps, or another section) a "Back" button shows for 6 s.
+  // This is in-memory per open document; the browser's own history (the #/t/<id> hash)
+  // is not touched, and Alt+Left never reaches the browser's Back while a document is open.
+  // ---------------------------------------------------------------------
+  const HIST_COALESCE_MS = 1000;
+  const HIST_SETTLE_MS = 650; // let a smooth scroll finish before the position is taken
+  const HIST_BIG_STEPS = 3;
+  const HIST_BACK_MS = 6000;
+  const hist = { entries: [], idx: -1, timer: null, lastAt: 0, backTimer: null, restoring: false, kind: null };
+  const $histBack = el("hist-back");
+
+  function histSnapshot() {
+    const tree = state.tree;
+    const total = Math.max(1, state.sequence.length);
+    const offset = state.anchorOffset;
+    const onPage = offset != null ? window.Frontier.findFrontierNodeAtOffset(tree, state.frontier, offset) : null;
+    const elA = onPage && $content.querySelector(`[data-node-id="${onPage}"]`);
+    return {
+      z: state.z,
+      k: window.Frontier.zToK(state.z, total),
+      frontier: state.frontier.slice(),
+      prose: Array.from(state.prose),
+      anchorId: state.anchorNodeId,
+      anchorOffset: offset,
+      pageAnchor: onPage || null,
+      anchorTop: elA ? elA.getBoundingClientRect().top : null,
+      scrollY: window.scrollY,
+      section: state.anchorNodeId ? sectionAncestor(tree, state.anchorNodeId) : null,
+    };
+  }
+
+  function sameHistPage(a, b) {
+    return a.frontier.length === b.frontier.length && a.frontier.every((x, i) => x === b.frontier[i]) &&
+      a.prose.length === b.prose.length && a.prose.every((x) => b.prose.includes(x));
+  }
+
+  function hideHistBack() {
+    clearTimeout(hist.backTimer);
+    $histBack.hidden = true;
+  }
+
+  function showHistBack() {
+    const pill = document.querySelector(".zoom-pill");
+    if (pill) {
+      const r = pill.getBoundingClientRect();
+      $histBack.style.top = `${Math.round(r.bottom + 8)}px`;
+      $histBack.style.right = `${Math.max(8, Math.round(window.innerWidth - r.right))}px`;
+    }
+    $histBack.hidden = false;
+    clearTimeout(hist.backTimer);
+    hist.backTimer = setTimeout(hideHistBack, HIST_BACK_MS);
+  }
+
+  function histTake() {
+    hist.timer = null;
+    if (!state.tree || hist.restoring) return;
+    const snap = histSnapshot();
+    const prev = hist.entries[hist.idx];
+    const now = Date.now();
+    if (prev && sameHistPage(prev, snap) && prev.section === snap.section) {
+      // nothing zoomed or jumped: just remember where we are scrolled
+      prev.anchorTop = snap.anchorTop;
+      prev.scrollY = snap.scrollY;
+      prev.anchorId = snap.anchorId;
+      prev.anchorOffset = snap.anchorOffset;
+      return;
+    }
+    const big = !!prev && (Math.abs(snap.k - prev.k) >= HIST_BIG_STEPS || (snap.section && prev.section && snap.section !== prev.section));
+    if (prev && !prev.base && now - hist.lastAt < HIST_COALESCE_MS && hist.idx === hist.entries.length - 1) {
+      // within about a second of the last entry: that entry becomes this state
+      const keepBig = prev.big;
+      hist.entries[hist.idx] = Object.assign(snap, { big: keepBig || big });
+    } else {
+      hist.entries.length = hist.idx + 1; // a new branch drops the forward entries
+      hist.entries.push(Object.assign(snap, { big }));
+      hist.idx = hist.entries.length - 1;
+    }
+    hist.lastAt = now;
+    if (hist.idx > 0 && hist.entries[hist.idx].big) showHistBack();
+  }
+
+  // Called at the end of a zoom gesture, section jump, search jump or map jump.
+  function recordHistory(kind) {
+    if (!state.tree || hist.restoring) return;
+    hist.kind = kind || hist.kind;
+    clearTimeout(hist.timer);
+    hist.timer = setTimeout(histTake, HIST_SETTLE_MS);
+  }
+
+  function flushHistory() {
+    if (hist.timer) {
+      clearTimeout(hist.timer);
+      histTake();
+    }
+  }
+
+  function histReset() {
+    clearTimeout(hist.timer);
+    hist.timer = null;
+    hist.entries = [];
+    hist.idx = -1;
+    hist.lastAt = 0;
+    hideHistBack();
+    if (state.tree) {
+      hist.entries.push(Object.assign(histSnapshot(), { big: false, base: true }));
+      hist.idx = 0;
+    }
+  }
+
+  function histRestore(e) {
+    const tree = state.tree;
+    hist.restoring = true;
+    try {
+      state.frontier = e.frontier.filter((id) => tree.nodes[id]);
+      state.prose = new Set(e.prose.filter((id) => tree.nodes[id]));
+      const anchor = e.anchorId && tree.nodes[e.anchorId] ? e.anchorId : tree.root;
+      state.anchorNodeId = anchor;
+      state.anchorOffset = e.anchorOffset;
+      state.pinMode = "point";
+      state.sequence = sequenceKeepingPage(anchor);
+      state.sequenceAnchor = anchor;
+      resetTopSpacer();
+      render({});
+      updateReadout();
+      const target = (e.pageAnchor && $content.querySelector(`[data-node-id="${e.pageAnchor}"]`)) || null;
+      state.lastDialChangeAt = Date.now() + 600;
+      if (target && e.anchorTop != null) {
+        const want = window.scrollY + target.getBoundingClientRect().top - e.anchorTop;
+        if (want < 0) {
+          topSpacerPx += -want;
+          $topSpacer.style.height = `${topSpacerPx}px`;
+          window.scrollTo(0, 0);
+        } else {
+          window.scrollTo(0, want);
+        }
+      } else {
+        window.scrollTo(0, e.scrollY || 0);
+      }
+      updateNavCurrent();
+      updateRail();
+      savePositionDebounced();
+    } finally {
+      hist.restoring = false;
+    }
+  }
+
+  function histGo(dir, via) {
+    if (!state.tree) return;
+    flushHistory();
+    const to = hist.idx + dir;
+    if (to < 0 || to >= hist.entries.length) return;
+    // where we are right now goes back into the entry we are leaving, so coming back returns here
+    const cur = hist.entries[hist.idx];
+    const snap = histSnapshot();
+    cur.anchorTop = snap.anchorTop;
+    cur.scrollY = snap.scrollY;
+    cur.anchorId = snap.anchorId;
+    cur.anchorOffset = snap.anchorOffset;
+    hist.idx = to;
+    hideHistBack();
+    histRestore(hist.entries[to]);
+    logEvent("history", { tree_id: state.tree.id, dir: dir < 0 ? "back" : "forward", via: via || "key" });
+  }
+
+  $histBack.addEventListener("click", () => histGo(-1, "button"));
+  document.addEventListener("keydown", (e) => {
+    if (!$app.classList.contains("active") || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    // The browser's own Back / Forward would leave the document: keep them for the zoom history.
+    e.preventDefault();
+    histGo(e.key === "ArrowLeft" ? -1 : 1, "key");
+  });
 
   // ---------------------------------------------------------------------
   // In-document search: "/" or Ctrl+F while a document is open.
@@ -2295,8 +2478,6 @@
     recordHistory("search");
   }
 
-  function recordHistory() {} // replaced by the zoom history below
-
   function openSearch() {
     if (!state.tree || !$app.classList.contains("active")) return;
     if (!search.open) search.opener = document.activeElement;
@@ -2509,6 +2690,7 @@
       }
     }
 
+    histReset();
     logEvent("open", { tree_id: tree.id, resumed: !!saved });
     flushEvents(false);
     ensureOverview(tree);
@@ -2577,6 +2759,8 @@
       flushEvents(false);
     }
     closeSearch();
+    clearTimeout(hist.timer);
+    hideHistBack();
     state.tree = null;
     state.dwellNode = null;
     state.dwellStart = 0;

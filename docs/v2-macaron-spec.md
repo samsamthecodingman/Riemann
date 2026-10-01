@@ -162,3 +162,17 @@ rely on colour); marks are re-applied after every re-render while the box is ope
 that highlights use. Counting and marking use one text-extraction routine (blocks separated by newlines), so they agree.
 
 The log gets one `search` event per settled query with only `query_length` and `matches` (a number), never the text.
+
+
+## Zoom history
+
+Alt+Left returns to the previous zoom level **and** position; Alt+Right goes forward. An entry is the page as it was
+(what is open and in which form, the anchor passage, and where that passage sat on screen) and is taken at the end of
+each zoom gesture (Z drag or sticky mode, Ctrl+wheel burst, a key or pill step), section jump (nav, "Up next", a `¶`
+link), search jump and map jump, after a 650 ms settle so a smooth scroll has finished. Entries within about a second of
+the last one merge into it (the first entry, taken on open, never merges); a new entry after going back drops the forward
+ones. Going back re-composes that page (same open passages, same forms) and puts the anchor passage back at the screen
+position it had. After a big jump (3 or more zoom steps, or another section) a "← Back" button appears under the zoom
+pill for 6 seconds. Alt+Left and Alt+Right are always taken by this while a document is open, so they never reach the
+browser's Back; the header's home button and the browser's own Back and Forward still work through the `#/t/<id>`
+hash, and the history is in memory per open document. The log gets a `history` event (`dir`, `via`).
