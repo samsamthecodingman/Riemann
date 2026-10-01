@@ -67,6 +67,7 @@ A folding panel on the home page asks about energy, mood, sleep, caffeine and me
 
 ### Other details
 
+- **Maths:** `$...$` and `$$...$$` LaTeX is drawn with KaTeX (from a CDN; if it does not load you see the LaTeX text). Prices like "$5 and $10" are left alone, and highlights around a formula keep working.
 - **Search:** press `/` or Ctrl+F (or click the magnifier) to search the whole document, including parts you have not opened. Enter and Shift+Enter step through matches; each opens just enough to show it and marks it in the text. Esc closes. Only the length of what you type is logged.
 - **Reading settings:** in the palette panel, a letter-spacing toggle and a reading width (narrow, normal, wide); both are remembered.
 - **Zoom history:** Alt+Left goes back to the previous zoom level and position, Alt+Right forward; after a big jump a "Back" button shows for a few seconds.

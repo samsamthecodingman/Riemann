@@ -790,11 +790,38 @@
 
   // Inline markdown for short strings (key points, essentials): everything
   // escaped first, then only **bold**, *italic* and `code` are turned into tags.
-  function renderInline(s) {
-    return escapeHtml(s || "")
+  function renderInline(s, opts) {
+    const mt = splitMaths(s || "");
+    const html = escapeHtml(mt.text)
       .replace(/\*\*([^*\n]+?)\*\*/g, "<strong>$1</strong>")
       .replace(/(^|[^*\w])\*([^*\s][^*\n]*?)\*(?!\w)/g, "$1<em>$2</em>")
       .replace(/`([^`\n]+?)`/g, "<code>$1</code>");
+    return restoreMaths(html, mt.maths, opts);
+  }
+
+  // Maths: $...$ and $$...$$ (see web/mathtext.js for what counts). Each formula becomes one
+  // atomic span.math whose data-len is the length of its LaTeX source, so highlight offsets count
+  // it as that source whether or not KaTeX loaded (with it the span holds KaTeX's markup, without
+  // it the LaTeX text itself).
+  function splitMaths(text) {
+    return window.MathText ? window.MathText.split(text) : { text: String(text), maths: [] };
+  }
+
+  function mathSpanHTML(m, plain) {
+    let inner = null;
+    if (!plain && window.katex && typeof window.katex.renderToString === "function") {
+      try {
+        inner = window.katex.renderToString(m.tex, { displayMode: m.display, throwOnError: false, strict: "ignore", output: "htmlAndMathml" });
+      } catch (e) {
+        inner = null;
+      }
+    }
+    if (inner == null) inner = escapeHtml(m.src);
+    return `<span class="math ${m.display ? "math-display" : "math-inline"}" data-len="${m.src.length}">${inner}</span>`;
+  }
+
+  function restoreMaths(html, maths, opts) {
+    return window.MathText ? window.MathText.restore(html, maths, (m) => mathSpanHTML(m, opts && opts.plainMath)) : html;
   }
 
   // Block markdown for prose and source leaves. marked does the parsing when
@@ -872,18 +899,20 @@
     return doc.body.innerHTML;
   }
 
-  function renderMarkdown(text) {
+  function renderMarkdown(text, opts) {
+    const mt = splitMaths(text || "");
     let html = null;
     if (window.marked && typeof window.marked.parse === "function") {
       try {
         // Raw HTML in the source is escaped, not passed through.
-        html = window.marked.parse(escapeRawHtml(text || ""), { gfm: true, breaks: false });
+        html = window.marked.parse(escapeRawHtml(mt.text), { gfm: true, breaks: false });
       } catch (e) {
         html = null;
       }
     }
-    if (html == null) html = miniMarkdown(text || "");
-    return sanitizeHTML(html);
+    if (html == null) html = miniMarkdown(mt.text);
+    // Formulas go back in after sanitising (the sanitiser would strip KaTeX's markup).
+    return restoreMaths(sanitizeHTML(html), mt.maths, opts);
   }
 
   function escapeRawHtml(src) {
@@ -1260,14 +1289,44 @@
     }
   }
 
+  // Highlight offsets count the text of a block with each formula (span.math) as one atomic
+  // unit as long as its LaTeX source, so they do not depend on how KaTeX lays the formula out
+  // (or on whether it loaded at all) and offsets saved before maths was rendered still fit.
+  function mathLen(elem) {
+    const n = Number(elem.dataset.len);
+    return Number.isFinite(n) && n >= 0 ? n : elem.textContent.length;
+  }
+
+  function textUnits(root) {
+    const units = [];
+    (function walk(node) {
+      for (const c of node.childNodes) {
+        if (c.nodeType === 3) units.push({ text: c, len: c.nodeValue.length });
+        else if (c.nodeType === 1) {
+          if (c.classList.contains("math")) units.push({ math: c, len: mathLen(c) });
+          else walk(c);
+        }
+      }
+    })(root);
+    return units;
+  }
+
+  function virtualLength(root) {
+    return textUnits(root).reduce((sum, u) => sum + u.len, 0);
+  }
+
   function findTextPos(container, target) {
-    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
     let acc = 0;
-    let node;
-    while ((node = walker.nextNode())) {
-      const len = node.textContent.length;
-      if (acc + len >= target) return { node, offset: target - acc };
-      acc += len;
+    for (const u of textUnits(container)) {
+      if (u.text) {
+        if (acc + u.len >= target) return { node: u.text, offset: target - acc };
+      } else if (acc + u.len >= target) {
+        // inside a formula: snap to the nearer edge of it
+        const parent = u.math.parentNode;
+        const idx = Array.prototype.indexOf.call(parent.childNodes, u.math);
+        return { node: parent, offset: target - acc <= u.len / 2 ? idx : idx + 1 };
+      }
+      acc += u.len;
     }
     return null;
   }
@@ -1296,11 +1355,22 @@
     }
   }
 
-  function rangeStartOffset(container, range) {
+  // Offsets of a selection inside a block, with any formula it touches taken whole.
+  function selectionOffsets(container, range) {
+    const r = range.cloneRange();
+    const mathOf = (n) => {
+      const e = n.nodeType === 1 ? n : n.parentElement;
+      return e && e.closest ? e.closest(".math") : null;
+    };
+    const sm = mathOf(r.startContainer);
+    const em = mathOf(r.endContainer);
+    if (sm) r.setStartBefore(sm);
+    if (em) r.setEndAfter(em);
     const pre = document.createRange();
     pre.selectNodeContents(container);
-    pre.setEnd(range.startContainer, range.startOffset);
-    return pre.toString().length;
+    pre.setEnd(r.startContainer, r.startOffset);
+    const start = virtualLength(pre.cloneContents());
+    return { start, end: start + virtualLength(r.cloneContents()) };
   }
 
   function hideHighlightToolbar() {
@@ -1351,8 +1421,7 @@
     const wrapper = body.closest("[data-node-id]");
     if (!wrapper) return;
     const nodeId = wrapper.dataset.nodeId;
-    const start = rangeStartOffset(body, range);
-    const end = start + range.toString().length;
+    const { start, end } = selectionOffsets(body, range);
     if (end <= start) return;
     showHighlightToolbar(range.getBoundingClientRect(), { mode: "add", nodeId, start, end });
   }
@@ -2324,6 +2393,7 @@
     let lastBlock = null;
     let n;
     while ((n = walker.nextNode())) {
+      if (n.parentElement && n.parentElement.closest(".math")) continue; // formulas are not searched
       const b = n.parentElement && n.parentElement.closest(BLOCK_SEL);
       if (segs.length && b !== lastBlock) virt += "\n";
       lastBlock = b;
@@ -2366,8 +2436,8 @@
       if (!(isRoot && !n.is_leaf)) {
         if (n.title) add(id, "title", escapeHtml(n.title));
         const points = n.key_points && n.key_points.length ? n.key_points : n.hook ? [n.hook] : [];
-        if (!n.is_leaf && points.length) add(id, "point", `<ul>${points.map((p) => `<li>${renderInline(p)}</li>`).join("")}</ul>`);
-        if (n.text) add(id, "text", renderMarkdown(n.text));
+        if (!n.is_leaf && points.length) add(id, "point", `<ul>${points.map((p) => `<li>${renderInline(p, { plainMath: true })}</li>`).join("")}</ul>`);
+        if (n.text) add(id, "text", renderMarkdown(n.text, { plainMath: true }));
       }
       for (const c of n.children || []) walk(c);
     })(tree.root);

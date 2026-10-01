@@ -192,3 +192,19 @@ defaults: spacing off, normal):
 Both feed the automatic single column: the character width includes the letter-spacing, and the column cap is the
 reading width, so turning letter-spacing on can turn two columns into one a little sooner. Changing either holds the
 reading position.
+
+
+## Maths
+
+`$...$` (inline) and `$$...$$` (display) LaTeX in summaries and source passages is drawn with KaTeX, loaded from
+cdn.jsdelivr.net like `marked` (pinned, `web/index.html`); if it does not load, a formula stays as its LaTeX text. Plain
+dollar amounts are not maths: an inline formula needs a non-space after the opening `$` (which is not directly after a
+letter or digit), a non-space before the closing `$` that is not directly followed by a digit, and a letter, backslash,
+`^`, `_` or `=` inside, so "$5 and $10", "US$5", "$5-$10" and "$5$" stay text; `\$`, inline code and fenced blocks are
+left alone (`web/mathtext.js`, tested in `tests/test_web_math.py`).
+
+**Highlights.** Highlights are stored as text offsets in a block. Each formula is one atomic `span.math` whose
+`data-len` is the length of its LaTeX source (delimiters included); `textUnits` / `findTextPos` / `selectionOffsets` in
+`app.js` count it as exactly that many characters, whether the span holds KaTeX's markup or the LaTeX text, so offsets do
+not depend on how KaTeX lays it out and offsets saved before maths was rendered still fit. A selection that starts or ends
+inside a formula takes the whole formula. Formulas are not searched.

@@ -3067,3 +3067,26 @@ body.col-dragging * {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: none; }
 }
+
+
+/* ---------- Maths (KaTeX, or the LaTeX text when it did not load) ---------- */
+
+.math {
+  letter-spacing: 0;
+}
+
+.math-display {
+  display: block;
+  margin: 0.5em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-align: center;
+}
+
+.math .katex {
+  font-size: 1.05em;
+}
+
+.math-display .katex-display {
+  margin: 0;
+}

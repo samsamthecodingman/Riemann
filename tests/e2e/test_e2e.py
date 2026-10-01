@@ -20,6 +20,7 @@ CHECKS = [
     "search_at_every_depth_never_errors_and_finds_summaries",
     "zoom_history_alt_arrows_restore_level_and_position",
     "reading_settings_persist_and_change_the_columns",
+    "maths_render_and_highlights_around_a_formula_restore",
     "cjk_word_count_agrees_with_server",
     "failed_build_shows_message_and_retries",
 ]

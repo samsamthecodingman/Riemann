@@ -567,6 +567,82 @@ const checks = {
     return { ok, base, narrow, wide, after, flips };
   },
 
+  async maths_render_and_highlights_around_a_formula_restore(page) {
+    // A stand-in for KaTeX whose output is much longer than the LaTeX source, so any highlight
+    // offsets that counted the rendered text would drift. (The real library is a CDN script.)
+    await page.route("**/katex*.js", (route) =>
+      route.fulfill({
+        contentType: "application/javascript",
+        body: 'window.katex={renderToString:function(t,o){return \'<span class="katex"><span class="katex-html" aria-hidden="true">\'+"GLYPH".repeat(12)+\'</span><span class="katex-mathml">\'+t.replace(/</g,"&lt;")+\'</span></span>\';}};',
+      })
+    );
+    await page.route("**/katex*.css", (route) => route.fulfill({ contentType: "text/css", body: "" }));
+    const lead = "Before the formula the energy is ";
+    const tail = " and then some trailing words follow after the formula here.";
+    const para = (n) => `Paragraph ${n}. ` + lead + "$E = mc^2$" + tail + " The tide moved sand along the northern beach. ".repeat(6);
+    const text = "# Maths\n\n" + [1, 2, 3, 4, 5, 6].map((s) => `## Part ${s}\n\n${para(s)}\n\nIt costs $5 and $10 in total, said the quartermaster ${s}.\n\n$$\\int_0^1 x\\,dx = \\frac12$$\n\n` + "Filler text about harbours. ".repeat(40)).join("\n\n");
+    const id = await buildText(text);
+    await openReader(page, id);
+    await deepZoom(page);
+    const info = await page.evaluate(() => {
+      const maths = [...document.querySelectorAll("#content .node-body .math")];
+      const price = [...document.querySelectorAll("#content .node-body p")].find((p) => /quartermaster/.test(p.textContent));
+      return {
+        n: maths.length,
+        inline: maths.filter((m) => m.classList.contains("math-inline")).length,
+        display: maths.filter((m) => m.classList.contains("math-display")).length,
+        rendered: maths.every((m) => m.querySelector(".katex")),
+        lens: [...new Set(maths.map((m) => m.dataset.len))],
+        priceIsText: !!price && !price.querySelector(".math") && /\$5 and \$10/.test(price.textContent),
+      };
+    });
+    // highlight a stretch before the formula, then one after it, in the same block
+    const select = async (which) => {
+      await page.evaluate((which) => {
+        const p = [...document.querySelectorAll("#content .node.leaf .node-body p")].find((p) => p.querySelector(".math-inline") && /Paragraph 3\./.test(p.textContent));
+        p.scrollIntoView({ block: "center" });
+        const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.parentElement.closest(".math") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) });
+        const first = walker.nextNode();
+        const last = (() => { let n, l; while ((n = walker.nextNode())) l = n; return l; })();
+        const r = document.createRange();
+        if (which === "before") {
+          const i = first.nodeValue.indexOf("formula the energy");
+          r.setStart(first, i);
+          r.setEnd(first, i + "formula the energy".length);
+        } else {
+          const i = last.nodeValue.indexOf("trailing words");
+          r.setStart(last, i);
+          r.setEnd(last, i + "trailing words".length);
+        }
+        const sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+        document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      }, which);
+      await page.waitForTimeout(250);
+      await page.click("#highlight-toolbar .hl-swatch >> nth=0");
+      await page.waitForTimeout(250);
+    };
+    await select("before");
+    await select("after");
+    const marks = () => page.evaluate(() => [...document.querySelectorAll("#content mark[data-hl-id]")].map((m) => m.textContent));
+    const before = await marks();
+    const stored = await page.evaluate((id) => JSON.parse(localStorage.getItem("riemann:hl:" + id)).map((h) => [h.start, h.end]), id);
+    await page.reload();
+    await page.waitForSelector("#content .node, .root-hero");
+    await page.waitForTimeout(800);
+    const after = await marks();
+    const mathAfter = await page.evaluate(() => document.querySelectorAll("#content .node-body .math").length);
+    // the offsets are the LaTeX source's: "$E = mc^2$" is 10 characters long, however it is drawn
+    const src = lead.length + 10 + tail.length;
+    const ok =
+      info.n >= 12 && info.inline >= 6 && info.display >= 6 && info.rendered && info.priceIsText &&
+      before.length === 2 && before[0] === "formula the energy" && before[1] === "trailing words" &&
+      after.length === 2 && after[0] === before[0] && after[1] === before[1] && mathAfter === info.n &&
+      stored.length === 2 && stored[1][0] - stored[0][1] === ("Paragraph 3. " + lead + "$E = mc^2$" + tail).indexOf("trailing words") - ("Paragraph 3. " + lead).indexOf("formula the energy") - "formula the energy".length;
+    return { ok, info, before, after, stored, src };
+  },
+
   async failed_build_shows_message_and_retries(page) {
     const text = "FAILME-ONCE " + Array.from({ length: 60 }, (_, i) => `Sentence ${i} about the harbour and its tides.`).join(" ")
       + "\n\n" + Array.from({ length: 60 }, (_, i) => `Another ${i} point about the survey boats.`).join(" ");
