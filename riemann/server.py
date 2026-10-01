@@ -252,12 +252,14 @@ async def api_rebuild(tree_id: str) -> dict:
 async def api_tree(tree_id: str):
     builder = build.get_builder(tree_id)
     if builder is not None:
-        return builder.tree.model_dump()
+        return {**builder.tree.model_dump(), "stale": False}
     tree = cache.load_tree(tree_id)
     if tree is not None:
-        if cache.exists(tree_id):
+        current = cache.exists(tree_id)
+        if current:
             cache.delete_marker(tree_id)  # a finished tree outranks a marker the build never got to remove
-        return tree.model_dump()
+        # `stale`: read from an older cache namespace (built by an older version); the reader offers a rebuild
+        return {**tree.model_dump(), "stale": not current}
     marker = cache.load_marker(tree_id)
     if marker is not None:
         return _interrupted(marker)

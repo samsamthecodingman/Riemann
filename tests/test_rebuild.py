@@ -70,6 +70,21 @@ async def test_rebuild_starts_a_fresh_build_from_the_stored_source_and_keeps_the
         assert cache.exists(new_id)  # under the current schema
 
 
+async def test_get_tree_says_whether_it_was_built_by_an_older_version():
+    async with await _client() as c:
+        tid = await _build_via_api(c)
+        assert (await c.get(f"/api/tree/{tid}")).json()["stale"] is False  # live builder
+        build.BUILDS.clear()
+        assert (await c.get(f"/api/tree/{tid}")).json()["stale"] is False  # saved under the current schema
+        _move_to_old_namespace(tid)
+        body = (await c.get(f"/api/tree/{tid}")).json()
+        assert body["stale"] is True and body["id"] == tid  # opens, flagged
+        r = await c.post(f"/api/tree/{tid}/rebuild")
+        await build.get_builder(r.json()["tree_id"]).task
+        build.BUILDS.clear()
+        assert (await c.get(f"/api/tree/{r.json()['tree_id']}")).json()["stale"] is False  # the rebuilt copy is current
+
+
 async def test_rebuild_renormalises_the_stored_source(monkeypatch):
     async with await _client() as c:
         tid = await _build_via_api(c)

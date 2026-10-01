@@ -137,6 +137,13 @@
     <button id="loading-retry" class="primary-btn" type="button">Try again</button>
   </div>
 
+  <div id="loading-interrupted" class="start-block loading-interrupted" hidden>
+    <p id="loading-interrupted-text">This build was interrupted (Riemann restarted). Build it again?</p>
+    <p class="loading-interrupted-note">It starts again from the same text and settings.</p>
+    <p id="loading-interrupted-error" class="loading-error-inline" role="alert" hidden></p>
+    <button id="loading-resume" class="primary-btn" type="button">Build it again</button>
+  </div>
+
   <div class="start-row loading-actions">
     <button id="loading-back" class="ghost-btn">&larr; Back</button>
     <span id="loading-elapsed" class="loading-elapsed"></span>
@@ -176,6 +183,7 @@
       ></div>
       <button id="zoom-more" type="button" aria-label="More detail">More +</button>
     </div>
+    <button id="doc-menu-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="doc-menu" aria-label="Document menu" title="Document menu">&#8943;</button>
   </header>
 
   <nav id="section-nav" aria-label="Sections">
@@ -208,6 +216,19 @@
     <button id="search-prev" type="button" class="search-nav" aria-label="Previous match">&#8593;</button>
     <button id="search-next" type="button" class="search-nav" aria-label="Next match">&#8595;</button>
     <button id="search-close" type="button" class="search-nav" aria-label="Close search">&#10005;</button>
+  </div>
+
+  <div id="doc-menu" aria-label="Document menu" hidden>
+    <p id="doc-menu-stale" class="doc-menu-note" hidden>Built with an older version.</p>
+    <button id="rebuild-btn" type="button" class="doc-menu-item">Rebuild with latest improvements</button>
+    <div id="rebuild-confirm" hidden>
+      <p class="doc-menu-note">Uses one full build of your Claude usage.</p>
+      <div class="doc-menu-row">
+        <button id="rebuild-go" type="button" class="primary-btn">Rebuild</button>
+        <button id="rebuild-cancel" type="button" class="ghost-btn">Cancel</button>
+      </div>
+    </div>
+    <p id="doc-menu-error" class="doc-menu-note doc-menu-error" role="alert" hidden></p>
   </div>
 
   <button id="hist-back" type="button" hidden aria-label="Back to where you were (Alt+Left)">&larr; Back</button>

@@ -792,7 +792,8 @@ kbd {
 
 #palette-btn,
 #map-btn,
-#search-btn {
+#search-btn,
+#doc-menu-btn {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -809,15 +810,22 @@ kbd {
   flex-shrink: 0;
 }
 
-#search-btn {
+#search-btn,
+#doc-menu-btn {
   width: 44px;
   padding: 0;
   justify-content: center;
 }
 
+#doc-menu-btn {
+  font-size: 22px;
+  line-height: 1;
+}
+
 #palette-btn[aria-pressed="true"],
 #map-btn[aria-pressed="true"],
-#search-btn[aria-pressed="true"] {
+#search-btn[aria-pressed="true"],
+#doc-menu-btn[aria-expanded="true"] {
   border: 2px solid var(--ink-btn);
 }
 
@@ -3089,4 +3097,89 @@ body.col-dragging * {
 
 .math-display .katex-display {
   margin: 0;
+}
+
+
+/* ---------- Document menu (rebuild) and the interrupted-build screen ---------- */
+
+#doc-menu {
+  position: fixed;
+  top: calc(var(--header-h) + 8px);
+  right: 24px;
+  z-index: 46;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+
+#doc-menu[hidden] {
+  display: none;
+}
+
+.doc-menu-item {
+  min-height: 44px;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--chip);
+  color: var(--text);
+  font-family: var(--ui);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.doc-menu-note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.doc-menu-error {
+  color: #8F2F22;
+}
+
+.doc-menu-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.loading-interrupted p {
+  margin: 0;
+  color: var(--text);
+}
+
+.loading-interrupted .loading-interrupted-note {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0.4rem 0 0.8rem;
+}
+
+.loading-interrupted .loading-error-inline {
+  color: #8F2F22;
+  margin: 0 0 0.6rem;
+}
+
+#loading-screen.interrupted .tagline,
+#loading-screen.interrupted .loading-steps,
+#loading-screen.interrupted .loading-elapsed,
+#loading-screen.interrupted .loading-gist {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  #doc-menu .primary-btn,
+  #doc-menu .ghost-btn {
+    min-height: 44px;
+  }
 }

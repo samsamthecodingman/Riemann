@@ -80,6 +80,7 @@ def server(tmp_path_factory, playwright_dir):
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
     env = dict(os.environ, RIEMANN_DATA_DIR=str(data), PYTHONPATH=str(ROOT))
+    os.environ["RIEMANN_E2E_DATA"] = str(data)  # runner.js writes old-version trees and build markers there
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "tests.e2e.fake_app:app", "--host", "127.0.0.1", "--port", str(port)],
         cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

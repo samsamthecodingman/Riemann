@@ -210,6 +210,9 @@ undated actions last. At most 12.
 - **Building marker.** When a build starts, a small marker (source text, title, goal, model, start time) is written
   to `<cache>/building/<id>.json`; it is deleted when the build finishes or fails (a failed build is retried with
   `POST /api/tree/{id}/retry` as before). If the server stops mid-build the marker is left behind.
+- **`stale`.** `GET /api/tree/{id}` adds `"stale": true` to a tree that was read from an older cache namespace (built by
+  an older version; it opens read-only) and `false` otherwise (a live build, or a tree saved under the current schema; a
+  rebuilt copy is current). The reader uses it for the "Built with an older version" hint in the document menu.
 - **`GET /api/tree/{id}`** (and `/events`) for an id that has a marker but no live builder and no saved tree answers
   **`409`** with
   `{"state": "interrupted", "tree_id": "...", "title": "...", "objective": "learn"|null, "model": "...", "started": <unix seconds>, "message": "..."}`.
@@ -264,3 +267,15 @@ Event types the UI should send (a phase-2 task; nothing sends them yet):
   middle of a sentence unless the text has neither. Leaves never pack across any heading level.
 - **PDF and email.** PDFs are read by layout; a pasted email loses quoted history, signature and legal footer. Both
   are server-side only. A ruled PDF table becomes a markdown table leaf (atomic, as before).
+
+
+### Reader: rebuild and interrupted builds
+
+- The header's **⋯ document menu** has "Rebuild with latest improvements". It asks first ("Uses one full build of your
+  Claude usage.", Rebuild or Cancel), then `POST /api/tree/{id}/rebuild`, closes the document, shows the loading screen for
+  the returned tree id (the address is updated to it) and opens the result; `{"cached": true}` opens that tree at once; an
+  error (for example 409 while it is still building) is shown in the menu. When the open tree has `stale: true` the menu
+  also says "Built with an older version."
+- A **409 `{state: "interrupted"}`** from `GET /api/tree/{id}` shows a screen instead of the old "may have been built by an
+  older version" message: "This build was interrupted (Riemann restarted). Build it again?" with a button that calls
+  `POST /api/tree/{id}/resume-build` and then shows the normal loading screen.

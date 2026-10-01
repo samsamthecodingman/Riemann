@@ -2778,6 +2778,7 @@
 
   function openTree(tree, opts) {
     closeSearch();
+    setDocMenu(false, { keepFocus: true });
     resetTopSpacer();
     opts = opts || {};
     state.tree = tree;
@@ -2890,14 +2891,15 @@
     state.loadingTimer = null;
   }
 
-  function showStartScreen() {
-    stopLoading();
+  // Close the open document (if any): note the close, save the position, drop its UI state.
+  function leaveDocument() {
     if (state.tree && $app.classList.contains("active")) {
       savePosition();
       logEvent("close", { tree_id: state.tree.id });
       flushEvents(false);
     }
     closeSearch();
+    setDocMenu(false);
     clearTimeout(hist.timer);
     hideHistBack();
     state.tree = null;
@@ -2911,8 +2913,14 @@
     }
     resetTopSpacer();
     if (window.RiemannMap) window.RiemannMap.update();
-    $loading.hidden = true;
     $app.classList.remove("active");
+  }
+
+  function showStartScreen() {
+    stopLoading();
+    leaveDocument();
+    $loading.hidden = true;
+    $loading.classList.remove("interrupted");
     $startScreen.style.display = "";
     document.title = "Riemann";
     window.scrollTo(0, 0);
@@ -2924,6 +2932,8 @@
     $startScreen.style.display = "none";
     $app.classList.remove("active");
     $loading.hidden = false;
+    $loading.classList.remove("interrupted");
+    el("loading-interrupted").hidden = true;
     $loading.setAttribute("aria-busy", "true");
     el("loading-doc").textContent = title || "";
     el("loading-heading").textContent = "Building your gist";
@@ -3010,6 +3020,131 @@
     }
   });
 
+  // A build the server never finished (GET /api/tree/{id} answers 409 {state: "interrupted"}):
+  // say so, and offer to start it again from the same text and settings.
+  function showInterrupted(info) {
+    stopLoading();
+    $startScreen.style.display = "none";
+    $app.classList.remove("active");
+    $loading.hidden = false;
+    $loading.classList.add("interrupted");
+    $loading.setAttribute("aria-busy", "false");
+    el("loading-doc").textContent = info.title || "";
+    el("loading-heading").textContent = "This build was interrupted";
+    el("loading-error").hidden = true;
+    el("loading-interrupted").hidden = false;
+    el("loading-interrupted-error").hidden = true;
+    el("loading-resume").dataset.treeId = info.tree_id || "";
+    el("loading-resume").dataset.title = info.title || "";
+    focusQuietly(el("loading-heading"));
+  }
+
+  el("loading-resume").addEventListener("click", async () => {
+    const btn = el("loading-resume");
+    const id = btn.dataset.treeId;
+    if (!id) return;
+    btn.disabled = true;
+    try {
+      const resp = await fetch(`/api/tree/${encodeURIComponent(id)}/resume-build`, { method: "POST" });
+      if (!resp.ok) {
+        const detail = (await resp.json().catch(() => ({}))).detail;
+        throw new Error(resp.status === 409 ? "That build failed earlier. Go back and build the document again." : detail || "Could not restart the build.");
+      }
+      logEvent("resume_build", { tree_id: id });
+      showLoading(id, btn.dataset.title);
+    } catch (err) {
+      el("loading-interrupted-error").textContent = err.message || "Could not restart the build.";
+      el("loading-interrupted-error").hidden = false;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // Document menu: rebuild with the latest improvements
+  // ---------------------------------------------------------------------
+  const $docMenuBtn = el("doc-menu-btn");
+  const $docMenu = el("doc-menu");
+
+  function resetRebuildConfirm() {
+    el("rebuild-confirm").hidden = true;
+    el("rebuild-btn").hidden = false;
+    el("doc-menu-error").hidden = true;
+  }
+
+  function setDocMenu(open, opts) {
+    const was = !$docMenu.hidden;
+    $docMenu.hidden = !open;
+    $docMenuBtn.setAttribute("aria-expanded", String(open));
+    if (open) {
+      resetRebuildConfirm();
+      el("doc-menu-stale").hidden = !(state.tree && state.tree.stale);
+      const r = $docMenuBtn.getBoundingClientRect();
+      $docMenu.style.top = `${Math.round(r.bottom + 8)}px`;
+      $docMenu.style.right = `${Math.max(8, Math.round(window.innerWidth - r.right))}px`;
+      el("rebuild-btn").focus();
+    } else if (was && !(opts && opts.keepFocus)) {
+      $docMenuBtn.focus({ preventScroll: true });
+    }
+  }
+
+  $docMenuBtn.addEventListener("click", () => setDocMenu($docMenu.hidden));
+  document.addEventListener("pointerdown", (e) => {
+    if ($docMenu.hidden) return;
+    if ($docMenu.contains(e.target) || $docMenuBtn.contains(e.target)) return;
+    setDocMenu(false, { keepFocus: true });
+  });
+  $docMenu.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      setDocMenu(false);
+    }
+  });
+  el("rebuild-btn").addEventListener("click", () => {
+    el("rebuild-btn").hidden = true;
+    el("rebuild-confirm").hidden = false;
+    el("rebuild-go").focus();
+  });
+  el("rebuild-cancel").addEventListener("click", () => {
+    resetRebuildConfirm();
+    el("rebuild-btn").focus();
+  });
+
+  el("rebuild-go").addEventListener("click", async () => {
+    const tree = state.tree;
+    if (!tree) return;
+    const go = el("rebuild-go");
+    go.disabled = true;
+    try {
+      const resp = await fetch(`/api/tree/${encodeURIComponent(tree.id)}/rebuild`, { method: "POST" });
+      if (!resp.ok) {
+        const detail = (await resp.json().catch(() => ({}))).detail;
+        throw new Error(typeof detail === "string" && detail ? detail : "Could not start the rebuild.");
+      }
+      const data = await resp.json();
+      logEvent("rebuild", { tree_id: tree.id });
+      const title = tree.title;
+      setDocMenu(false, { keepFocus: true });
+      leaveDocument();
+      const nid = data.tree_id;
+      // The rebuilt tree usually has the same id; either way the address now names it.
+      const hash = `#/t/${nid}`;
+      if (location.hash !== hash) history.replaceState(null, "", location.pathname + location.search + hash);
+      if (data.cached) {
+        const fresh = await (await fetch(`/api/tree/${encodeURIComponent(nid)}`)).json();
+        if (fresh.status === "done") openTree(fresh, { forceFresh: true });
+        else showLoading(nid, fresh.title);
+      } else {
+        showLoading(nid, title);
+      }
+    } catch (err) {
+      el("doc-menu-error").textContent = err.message || "Could not start the rebuild.";
+      el("doc-menu-error").hidden = false;
+    } finally {
+      go.disabled = false;
+    }
+  });
+
   // ---------------------------------------------------------------------
   // Routing: #/t/<tree id> is a document, anything else is the home page.
   // The browser's Back button and the header's home button both land home.
@@ -3051,6 +3186,14 @@
 
   async function openTreeById(treeId) {
     const resp = await fetch(`/api/tree/${treeId}`);
+    if (resp.status === 409) {
+      const info = await resp.json().catch(() => null);
+      if (info && info.state === "interrupted") {
+        document.title = `${info.title || "Document"} · Riemann`;
+        showInterrupted(info);
+        return;
+      }
+    }
     if (!resp.ok) throw new Error("Could not find that document. It may have been built by an older version.");
     const tree = await resp.json();
     document.title = `${tree.title || "Document"} · Riemann`;

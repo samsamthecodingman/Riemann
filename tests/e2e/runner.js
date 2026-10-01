@@ -85,6 +85,8 @@ function longDoc() {
   return out;
 }
 
+const DATA = process.env.RIEMANN_E2E_DATA; // the server's scratch data folder (set by conftest.py)
+
 const checks = {
   async zoom_grows_words(page) {
     await openReader(page);
@@ -643,6 +645,73 @@ const checks = {
     return { ok, info, before, after, stored, src };
   },
 
+  async rebuild_menu_confirms_hints_at_old_version_and_rebuilds(page) {
+    const x = await buildText(longDoc());
+    const trees = path.join(DATA, "cache", "trees");
+    const current = fs.readdirSync(trees).find((d) => fs.existsSync(path.join(trees, d, x + ".json")));
+    const tree = JSON.parse(fs.readFileSync(path.join(trees, current, x + ".json"), "utf8"));
+    const oldId = "feedfacecafe0001";
+    const oldDir = path.join(trees, "r3-leaf120-gist25-stop34-schema1");
+    fs.mkdirSync(oldDir, { recursive: true });
+    fs.writeFileSync(path.join(oldDir, oldId + ".json"), JSON.stringify({ ...tree, id: oldId, source_text: tree.source_text + "\n\nA closing paragraph added so the rebuilt copy is a new document." }));
+    const posts = [];
+    page.on("request", (r) => { if (r.method() === "POST" && /\/rebuild$/.test(r.url())) posts.push(r.url()); });
+    // a tree built by this version: the menu has no older-version hint
+    await openReader(page, x);
+    await page.click("#doc-menu-btn");
+    const fresh = await page.evaluate(() => ({ open: !document.querySelector("#doc-menu").hidden, stale: !document.querySelector("#doc-menu-stale").hidden }));
+    await page.keyboard.press("Escape");
+    // an older-version tree: the hint shows
+    await page.goto("about:blank");
+    await openReader(page, oldId);
+    await page.evaluate(() => {
+      window.__sawLoading = false;
+      new MutationObserver(() => { if (!document.querySelector("#loading-screen").hidden) window.__sawLoading = true; }).observe(document.querySelector("#loading-screen"), { attributes: true });
+    });
+    await page.click("#doc-menu-btn");
+    const old = await page.evaluate(() => ({ stale: !document.querySelector("#doc-menu-stale").hidden, note: document.querySelector("#doc-menu-stale").textContent }));
+    await page.click("#rebuild-btn");
+    const confirm = await page.evaluate(() => ({ shown: !document.querySelector("#rebuild-confirm").hidden, text: document.querySelector("#rebuild-confirm").innerText }));
+    await page.click("#rebuild-cancel");
+    const cancelled = await page.evaluate(() => document.querySelector("#rebuild-confirm").hidden && !document.querySelector("#rebuild-btn").hidden);
+    const noPostYet = posts.length === 0;
+    await page.click("#rebuild-btn");
+    await page.click("#rebuild-go");
+    await page.waitForSelector("#content .node, .root-hero", { timeout: 15000 });
+    await page.waitForTimeout(500);
+    const after = await page.evaluate(() => ({ hash: location.hash, saw: window.__sawLoading, menuClosed: document.querySelector("#doc-menu").hidden, reader: document.querySelector("#app").classList.contains("active") }));
+    const newId = after.hash.replace("#/t/", "");
+    const stale = (await (await fetch(`${BASE}/api/tree/${newId}`)).json()).stale;
+    const ok =
+      fresh.open && !fresh.stale && old.stale && /older version/.test(old.note) &&
+      confirm.shown && /Uses one full build of your Claude usage/.test(confirm.text) && cancelled && noPostYet &&
+      posts.length === 1 && posts[0].includes(oldId) && after.reader && after.menuClosed && newId !== oldId && stale === false;
+    return { ok, fresh, old, confirm, cancelled, posts, after, newId, stale };
+  },
+
+  async interrupted_build_offers_to_build_it_again(page) {
+    const id = (Date.now().toString(16) + "0123456789abcdef").slice(0, 16); // a fresh id each run
+    const dir = path.join(DATA, "cache", "building");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, id + ".json"), JSON.stringify({ id, title: "Interrupted notes", source_text: longDoc(), objective: null, model: "claude-sonnet-5-5", started: Date.now() / 1000 - 90 }));
+    await page.goto(`${BASE}/#/t/${id}`);
+    await page.waitForSelector("#loading-interrupted:not([hidden])", { timeout: 10000 });
+    const shown = await page.evaluate(() => ({
+      heading: document.querySelector("#loading-heading").innerText,
+      text: document.querySelector("#loading-interrupted-text").innerText,
+      startError: !document.querySelector("#paste-error").hidden,
+      startShown: getComputedStyle(document.querySelector("#start-screen")).display !== "none",
+      steps: getComputedStyle(document.querySelector("#loading-steps")).display,
+    }));
+    await page.click("#loading-resume");
+    await page.waitForSelector("#content .node, .root-hero", { timeout: 15000 });
+    const done = await page.evaluate(() => ({ hash: location.hash, title: document.title }));
+    const ok =
+      /interrupted/i.test(shown.heading) && /This build was interrupted \(Riemann restarted\)\. Build it again\?/.test(shown.text) &&
+      !shown.startError && !shown.startShown && shown.steps === "none" && done.hash === "#/t/" + id;
+    return { ok, shown, done };
+  },
+
   async failed_build_shows_message_and_retries(page) {
     const text = "FAILME-ONCE " + Array.from({ length: 60 }, (_, i) => `Sentence ${i} about the harbour and its tides.`).join(" ")
       + "\n\n" + Array.from({ length: 60 }, (_, i) => `Another ${i} point about the survey boats.`).join(" ");
@@ -764,9 +833,12 @@ const checks = {
     const page = await ctx.newPage();
     const errors = watch(page);
     const result = await fn(page, errors);
-    if (result.ok && CHECK !== "monkey_seed" && errors.length) {
+    // The browser logs every non-2xx fetch; an interrupted build is answered 409 by design.
+    const allowed = { interrupted_build_offers_to_build_it_again: /status of 409/ }[CHECK];
+    const unexpected = allowed ? errors.filter((e) => !allowed.test(e)) : errors;
+    if (result.ok && CHECK !== "monkey_seed" && unexpected.length) {
       result.ok = false;
-      result.errors = errors;
+      result.errors = unexpected;
     }
     console.log(JSON.stringify(result));
   } catch (e) {
