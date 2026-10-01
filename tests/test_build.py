@@ -415,7 +415,7 @@ def test_overview_drops_bad_items_and_invented_numbers():
             {"label": "Pages", "value": "10 pages", "cites": ["l2"]},  # 10 not in cited leaf
             {"label": "Submit how", "value": "not stated", "cites": []},
             {"label": "Due", "value": "again", "cites": ["l1"]},  # duplicate label
-            {"label": "Bogus cite", "value": "Friday", "cites": ["nope"]},
+            {"label": "Bogus cite", "value": "see the brief", "cites": ["nope"]},
             {"label": "", "value": "no label"},
             "not a dict",
         ],
@@ -457,6 +457,14 @@ def test_numbers_must_match_whole_numbers_not_substrings():
     assert not ok("100", src)  # inside 1,000
     assert ok("2025.", src)  # sentence punctuation is ignored
     assert ok("billion", "about a billion people") and not ok("million", "millions of people")
+
+
+def test_a_small_number_may_be_a_word_in_the_source_but_not_a_different_number():
+    from riemann.abstraction.build import _number_in_source as ok
+
+    assert ok("3", "three offices took part") and ok("12", "twelve pages") and ok("40", "forty marks") and ok("0", "zero errors")
+    assert not ok("13", "twelve pages") and not ok("4", "three offices") and not ok("21", "twenty one") and not ok("30", "thirteen")
+    assert not ok("3", "the threefold increase")  # a word, not part of one
 
 
 def test_essential_with_a_number_only_inside_a_longer_number_is_dropped():

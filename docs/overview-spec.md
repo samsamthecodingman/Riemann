@@ -75,3 +75,41 @@ into the current cache namespace.
 
 `SCHEMA_VERSION = "schema6"`. `/api/recent`, `/api/tree/{id}` and open-by-id fall back, read-only, to older
 build-version dirs (and the flat `trees/` dir), so documents built earlier still open. Nothing is written to them.
+
+## Phase 1 data contract
+
+What the backend now produces for the reader (phase 2 builds the UI on it). Everything is additive and
+optional: an old tree, or one where a check removed a field, simply lacks it, and nothing here needs a progress
+bar, a read mark or a "checked" tick. The cache namespace is `schema6`; older trees still open read-only.
+
+To see example values without a model, run the fake-summariser app and paste the sample documents in
+`tests/fixtures/` (an assignment brief, a paper and meeting notes; they are synthetic):
+
+    RIEMANN_DATA_DIR=/tmp/riemann-ui uv run uvicorn tests.e2e.fake_app:app --port 8765
+
+### Faithfulness checks (deterministic, in `checks.py` and `build.py`)
+
+Short model-written items (essentials, key facts, `start_here`, `size_of_job`, the deadline and actions) are
+checked against the leaves they cite, and dropped when a check fails:
+
+- **Numbers** (as before) must appear as whole numbers in a cited leaf; a small number may be a word there
+  ("3 offices" for "three offices").
+- **Dates:** weekday names and month names in the item must appear in a cited leaf (`Fri` matches `Friday`; a
+  numeric date such as 14/11/2025 supplies its month; "may" is only a month beside a day number).
+- **Cite overlap:** an essential or key fact must share at least `CITE_OVERLAP_FLOOR` (0.35) of its content words
+  (stemmed, stop words ignored) with its cited leaves. "not stated" values are exempt; an item with no valid cite
+  is judged on its numbers and dates only (which fail without a cite).
+- **Negation and modality (log only):** if the source sentence an item is mostly about contains not, must not,
+  unless, except, only if, no ... and the item (label included) has none of them, the build records a
+  `warning` event and a Python log line. Nothing is dropped and nothing changes in the tree.
+
+`warning` events appear in the build history (`GET /api/tree/{id}/events` replays them, and they are streamed as
+`event: warning` while building; ignore them if you do not use them):
+
+    {"kind": "qualifier_dropped", "where": "essential Due" | "key fact 5%" | "start_here" | "action Tom Becker",
+     "qualifier": "not", "sentence": "<the source sentence, up to 300 chars>", "item": "<the item text>"}
+
+Measured on the 15 cached trees (64 key facts and 12 essentials with cites): the date and overlap checks drop
+0 of 76 real items (before: 0). As a control, the same items cited to a random other leaf of their document are
+dropped 93.2% of the time (the old number check alone: 86.8%). The qualifier check would warn on 7 of 76.
+

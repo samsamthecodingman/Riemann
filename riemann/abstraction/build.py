@@ -14,7 +14,9 @@ import asyncio
 import hashlib
 import logging
 import re
+from collections.abc import Callable
 
+from riemann.abstraction import checks
 from riemann.abstraction.chunk import TINY_DOC_WORDS, chunk, head_words, word_count
 from riemann.abstraction.model import Essential, KeyFact, Node, Overview, Tree
 from riemann.abstraction.summarise import ModelError, Summariser, parse_json_robustly
@@ -459,17 +461,35 @@ def _strip_thousands(s: str) -> str:
     return re.sub(r"(?<=\d),(?=\d{3}(?!\d))", "", s)
 
 
+_NUMBER_WORDS = (
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty"
+).split()
+_NUMBER_WORDS_TENS = {30: "thirty", 40: "forty", 50: "fifty", 60: "sixty", 70: "seventy", 80: "eighty", 90: "ninety"}
+
+
+def _number_word(n: int) -> str | None:
+    """The English word for 0-20 and the round tens up to 90 ("three", "forty"), else None."""
+    if 0 <= n <= 20:
+        return _NUMBER_WORDS[n]
+    return _NUMBER_WORDS_TENS.get(n)
+
+
 def _number_in_source(token: str, source_lower: str) -> bool:
     """Is this number token in the source as a whole number? A plain substring
     test let "5" pass against "25%" and "20" against "2025"; a match must not
-    start or end inside a longer number. Thousands commas are ignored."""
+    start or end inside a longer number. Thousands commas are ignored. A small
+    number may be written as a word in the source ("3 offices" for "three offices")."""
     tok = token.lower().rstrip(".,")
     if not tok:
         return True
     if not tok[0].isdigit():  # "billion", "million"
         return re.search(rf"\b{re.escape(tok)}\b", source_lower) is not None
     pattern = r"(?<![\w.,])" + re.escape(_strip_thousands(tok)) + r"(?!\d|[.,]\d)"
-    return re.search(pattern, _strip_thousands(source_lower)) is not None
+    if re.search(pattern, _strip_thousands(source_lower)) is not None:
+        return True
+    if tok.isdigit() and (word := _number_word(int(tok))) is not None:
+        return re.search(rf"\b{word}\b", source_lower) is not None
+    return False
 
 
 def _prose_numbers(text: str) -> list[str]:
@@ -478,9 +498,44 @@ def _prose_numbers(text: str) -> list[str]:
     return [t.rstrip(".,") for t in _number_tokens(text) if t.rstrip(".,")]
 
 
-def _validate_key_fact(raw: object, nodes: dict[str, Node], leaf_ctx_ids: list[str]) -> KeyFact | None:
+# A cited item must share at least this share of its content words with the leaves it cites. Tuned on the
+# cached trees: every real essential and key fact scores 0.43 or more, a random other leaf of the same
+# document scores below 0.35 for about 94% of items (see docs/overview-spec.md, "Faithfulness checks").
+CITE_OVERLAP_FLOOR = 0.35
+
+Warn = Callable[[str, str, dict], None]
+
+
+def log_warning(kind: str, where: str, detail: dict) -> None:
+    """The default sink for non-fatal checks: the Python logger (the build also records them in its history)."""
+    short = {k: (v[:160] if isinstance(v, str) else v) for k, v in detail.items()}
+    logging.getLogger("riemann").warning("%s in %s: %s", kind, where, short)
+
+
+def _dropped(what: str, reason: str) -> None:
+    """Debug trail for an item a check removed (INFO, so a normal run stays quiet)."""
+    logging.getLogger("riemann").info("dropped %s: %s", what, reason)
+
+
+def _warn_dropped_qualifier(warn: Warn | None, where: str, item_text: str, cited_text: str) -> None:
+    """Log only: the cited source sentence says "not", "unless", "except" ... and the item does not."""
+    if warn is None:
+        return
+    found = checks.qualifier_dropped(item_text, cited_text)
+    if found:
+        warn("qualifier_dropped", where, {"qualifier": found[0], "sentence": found[1][:300], "item": item_text[:300]})
+
+
+def _supported(text: str, source: str) -> bool:
+    """Numbers, weekday names and month names in `text` all appear in `source`."""
+    low = source.lower()
+    return all(_number_in_source(tok, low) for tok in _prose_numbers(text)) and checks.dates_ok(text, source)
+
+
+def _validate_key_fact(raw: object, nodes: dict[str, Node], leaf_ctx_ids: list[str], warn: Warn | None = None) -> KeyFact | None:
     """Deterministic validation: every number-like token in big/detail must
-    appear in the text of the cited leaves, or the whole KeyFact is dropped."""
+    appear in the text of the cited leaves, weekday and month names too, and
+    the fact must share content words with them, or the whole KeyFact is dropped."""
     if not isinstance(raw, dict):
         return None
     big = raw.get("big")
@@ -494,11 +549,19 @@ def _validate_key_fact(raw: object, nodes: dict[str, Node], leaf_ctx_ids: list[s
     cites = [c for c in cites_raw if isinstance(c, str) and c in leaf_ctx_ids] if isinstance(cites_raw, list) else []
     if not cites:  # a key fact must point at the source it came from
         return None
-    source_text = " ".join(nodes[c].text for c in cites if c in nodes).lower()
+    source_text = " ".join(nodes[c].text for c in cites if c in nodes)
 
     for token in _number_tokens(big) + _number_tokens(detail):
-        if not _number_in_source(token, source_text):
+        if not _number_in_source(token, source_text.lower()):
+            _dropped(f"key fact {big!r}", f"number {token!r} is not in the cited leaves")
             return None
+    if not checks.dates_ok(f"{big} {detail}", source_text):
+        _dropped(f"key fact {big!r}", "weekday or month not in the cited leaves")
+        return None
+    if not checks.overlap_ok(f"{big} {detail}", source_text, CITE_OVERLAP_FLOOR):
+        _dropped(f"key fact {big!r}", "too few words shared with the cited leaves")
+        return None
+    _warn_dropped_qualifier(warn, f"key fact {big}", f"{big} {detail}", source_text)
 
     return KeyFact(big=big, detail=detail, cites=cites)
 
@@ -564,9 +627,8 @@ Respond with ONLY JSON, no prose outside it and no markdown code fences:
 - plan: Milestones, Next action, Dependencies
 - email or message: The ask, From, Reply by
 - reference or guide: Covers, Key rules, Where to look
-Every value must come from the source. Never invent or guess: if the source does not say (for example no due date is given), write exactly "not stated" for that value and leave its cites empty. Copy numbers, dates and names exactly as the source writes them.
-"cites": leaf ids only, from the "Leaf ids you may cite" list, naming the leaves the value comes from. Every number in a value must appear in a cited leaf."""
-
+Every value must come from the source. Never invent or guess: if the source does not say (for example no due date is given), write exactly "not stated" for that value and leave its cites empty. Copy numbers, dates, weekday and month names and people's names exactly as the source writes them.
+"cites": leaf ids only, from the "Leaf ids you may cite" list, naming the leaves the value comes from. Every number, weekday and month in a value must appear in a cited leaf, and the value must be in words the cited leaves use."""
 
 # What the reader's goal makes the most useful essentials (appended to the
 # overview prompt after the OBJECTIVE_FOCUS block).
@@ -578,6 +640,14 @@ OVERVIEW_ESSENTIALS: dict[str, str] = {
     "plan": "For this reader, prefer essentials like: Milestones, Next action, Dependencies, Dates, Owners.",
     "communicate": "For this reader, prefer essentials like: The ask, From, Reply by, What is needed from you.",
 }
+
+
+
+def _overview_system(tree: Tree) -> str:
+    system = with_objective(OVERVIEW_SYSTEM, tree.objective)
+    if tree.objective in OVERVIEW_ESSENTIALS:
+        system += "\n\n" + OVERVIEW_ESSENTIALS[tree.objective]
+    return system
 
 
 def _leaf_ids_in_order(tree: Tree) -> list[str]:
@@ -616,10 +686,15 @@ def _overview_prompt(tree: Tree) -> tuple[str, list[str]]:
     return "\n".join(lines), shown
 
 
-def _clean_essentials(raw: object, nodes: dict[str, Node], all_leaf_ids: set[str]) -> list[Essential]:
+_NOT_STATED_RE = re.compile(r"^\s*not stated\b", re.I)
+
+
+def _clean_essentials(raw: object, nodes: dict[str, Node], all_leaf_ids: set[str], warn: Warn | None = None) -> list[Essential]:
     """Deterministic validation: drop an item with no label/value, a duplicate
-    label, or a value with a number that is not in its cited leaves (cites must
-    be real leaf ids). "not stated" needs no cites."""
+    label, or a value with a number, weekday or month that is not in its cited
+    leaves (cites must be real leaf ids), or one that shares too few content
+    words with them. "not stated" needs no cites and is not checked. A dropped
+    negation or exception is only reported (`warn`)."""
     if not isinstance(raw, list):
         return []
     out: list[Essential] = []
@@ -636,9 +711,15 @@ def _clean_essentials(raw: object, nodes: dict[str, Node], all_leaf_ids: set[str
             continue
         cites_raw = item.get("cites")
         cites = [c for c in cites_raw if isinstance(c, str) and c in all_leaf_ids] if isinstance(cites_raw, list) else []
-        source = " ".join(nodes[c].text for c in cites).lower()
-        if any(not _number_in_source(tok, source) for tok in _prose_numbers(value)):
+        source = " ".join(nodes[c].text for c in cites)
+        if not _supported(value, source):
+            _dropped(f"essential {label!r}", "a number, weekday or month is not in the cited leaves")
             continue
+        if cites and not _NOT_STATED_RE.match(value):
+            if not checks.overlap_ok(value, source, CITE_OVERLAP_FLOOR):
+                _dropped(f"essential {label!r}", "too few words shared with the cited leaves")
+                continue
+            _warn_dropped_qualifier(warn, f"essential {label}", f"{label}: {value}", source)
         seen.add(label.lower())
         out.append(Essential(label=label, value=value, cites=cites))
         if len(out) >= ESSENTIALS_MAX:
@@ -646,7 +727,7 @@ def _clean_essentials(raw: object, nodes: dict[str, Node], all_leaf_ids: set[str
     return out
 
 
-def _clean_overview(raw: object, tree: Tree) -> Overview | None:
+def _clean_overview(raw: object, tree: Tree, warn: Warn | None = None) -> Overview | None:
     if not isinstance(raw, dict):
         return None
     doc_title = raw.get("doc_title")
@@ -657,29 +738,36 @@ def _clean_overview(raw: object, tree: Tree) -> Overview | None:
     doc_title = _cap_chars(_truncate_words(doc_title.strip(), OVERVIEW_TITLE_MAX_WORDS), 200)
     doc_kind = _cap_chars(_truncate_words(doc_kind.strip().rstrip("."), OVERVIEW_KIND_MAX_WORDS), 40)
     source_lower = tree.source_text.lower()
-    what_ok = isinstance(what, str) and what.strip() and all(_number_in_source(t, source_lower) for t in _prose_numbers(what))
+    what_ok = (
+        isinstance(what, str)
+        and what.strip()
+        and all(_number_in_source(t, source_lower) for t in _prose_numbers(what))
+        and checks.dates_ok(what, tree.source_text)
+    )
     if what_ok:
         what = _cap_chars(_truncate_words(what.strip(), OVERVIEW_WHAT_MAX_WORDS), 400)
     else:
         article = "an" if doc_kind[:1].lower() in "aeiou" else "a"
         what = f"This is {article} {doc_kind[:1].lower() + doc_kind[1:]}."
     all_leaf_ids = {i for i in _leaf_ids_in_order(tree)}
-    essentials = _clean_essentials(raw.get("essentials"), tree.nodes, all_leaf_ids)
-    return Overview(doc_title=doc_title, doc_kind=doc_kind, what_it_is=what, essentials=essentials)
+    essentials = _clean_essentials(raw.get("essentials"), tree.nodes, all_leaf_ids, warn)
+    return Overview(
+        doc_title=doc_title,
+        doc_kind=doc_kind,
+        what_it_is=what,
+        essentials=essentials,
+    )
 
 
-async def generate_overview(tree: Tree, summariser: Summariser) -> Overview | None:
+async def generate_overview(tree: Tree, summariser: Summariser, warn: Warn | None = None) -> Overview | None:
     """One model call (root/section summaries + the source's first ~4000 words
     with leaf ids) for the overview card; validated deterministically. None if
     the tree has no internal structure or the reply is unusable."""
     if tree.root not in tree.nodes or tree.nodes[tree.root].is_leaf:
         return None
     prompt, _shown = _overview_prompt(tree)
-    system = with_objective(OVERVIEW_SYSTEM, tree.objective)
-    if tree.objective in OVERVIEW_ESSENTIALS:
-        system += "\n\n" + OVERVIEW_ESSENTIALS[tree.objective]
-    result = await _call_summariser_json(summariser, prompt, system)
-    return _clean_overview(result, tree)
+    result = await _call_summariser_json(summariser, prompt, _overview_system(tree))
+    return _clean_overview(result, tree, warn=warn if warn is not None else log_warning)
 
 
 class TreeBuilder:
@@ -707,6 +795,13 @@ class TreeBuilder:
         self.history.append((name, data))
         for queue in list(self._subscribers):
             await queue.put((name, data))
+
+
+async def _emit_warning(builder: TreeBuilder, kind: str, where: str, detail: dict) -> None:
+    """A non-fatal finding of a faithfulness check: logged, and recorded in the build's history as a
+    "warning" event ({kind, where, ...detail}). It never stops the build and nothing is dropped for it."""
+    log_warning(kind, where, detail)
+    await builder._emit("warning", {"kind": kind, "where": where, **detail})
 
 
 BUILDS: dict[str, TreeBuilder] = {}
@@ -918,7 +1013,8 @@ async def _build_levels(
             hook = _clean_hook(result.get("hook"))
             key_points = _clean_key_points(result.get("key_points"))
             steps = _clean_steps(result.get("steps"))
-            key_fact = _validate_key_fact(result.get("key_fact"), nodes, leaf_ctx_ids)
+            node_warnings: list[tuple[str, str, dict]] = []
+            key_fact = _validate_key_fact(result.get("key_fact"), nodes, leaf_ctx_ids, warn=lambda *w: node_warnings.append(w))
             child_titles = _clean_child_titles(result.get("child_titles"), group_ids)
             child_short = _clean_child_short_titles(result.get("child_short_titles"), group_ids)
 
@@ -944,6 +1040,8 @@ async def _build_levels(
                 steps=steps,
             )
             nodes[nid] = parent
+            for kind, where, detail in node_warnings:
+                await _emit_warning(builder, kind, where, detail)
             for cid in group_ids:
                 nodes[cid].parent = nid
                 if cid in importance_map:
@@ -1037,11 +1135,14 @@ async def _build_levels(
 
     # The overview is part of "done": anything polling the tree's status must
     # not see a finished tree that is about to gain its card.
+    overview_warnings: list[tuple[str, str, dict]] = []
     try:
-        tree.overview = await generate_overview(tree, summariser)
+        tree.overview = await generate_overview(tree, summariser, warn=lambda *w: overview_warnings.append(w))
     except Exception as exc:  # noqa: BLE001 - the reader backfills the overview on open
         logging.getLogger("riemann").warning("overview generation failed: %s", type(exc).__name__)
         tree.overview = None
+    for kind, where, detail in overview_warnings:
+        await _emit_warning(builder, kind, where, detail)
     tree.status = "done"
 
     _save(tree)
