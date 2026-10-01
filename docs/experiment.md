@@ -54,8 +54,23 @@ All of it stays on your machine, in the event log (`~/.local/share/riemann/event
 Any event can also carry `condition`, `phase` and `doc_label` itself. Values outside the allowed ranges are
 dropped when the event is saved, and the rest of the event is kept.
 
-The switch for A and B, and the small forms, are built into the app separately. Until they are there you can write
-an event by hand while Riemann is running, for example when you start phase B1:
+## In the app
+
+On the home page, a collapsed **Experiment** section (it says "off" until you use it) sets the condition (A the
+original, B Riemann), the phase (A1, B1, A2, B2; choosing a phase sets the condition) and an optional document label
+(no document text). **Start** (or **Update**) sends an `experiment {action: "set"}` event and remembers the choice on this
+device; **End experiment** sends `{action: "end"}` and turns it off. While it is on, `open`, `close`, `did_it_help` and
+`outcome` events also carry the condition, phase and label.
+
+Whether or not the experiment is on, every `close` event carries the session numbers: `session_ms`, `first_zoom_ms`
+(open to the first zoom; left out if you never zoomed), `max_z` and `source_checks`. When the experiment is on, closing a
+document shows a small dismissible card on the home page: "Did it help?" (Yes or No, B phases only; sends `did_it_help`)
+and "Add the numbers", a form for `outcome` (minutes until you knew what to do, the 0 to 5 checklist score, the six effort
+sliders, and the "a week later" answers). Every field is optional and only what you fill in is sent; reopen the form from
+the Experiment section later with the same label to add the rest. Nothing is shown in the reader, and nothing at all
+when the experiment is off.
+
+You can also write an event by hand while Riemann is running, for example when you start phase B1:
 
     curl -s -X POST http://127.0.0.1:8765/api/events -H 'Content-Type: application/json' \
       -d '[{"type":"experiment","action":"set","condition":"B","phase":"B1","doc_label":"week1-brief"}]'

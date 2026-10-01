@@ -3183,3 +3183,166 @@ body.col-dragging * {
     min-height: 44px;
   }
 }
+
+
+/* ---------- Experiment (home page; docs/experiment.md) ---------- */
+
+.exp-input {
+  width: 100%;
+  max-width: 28rem;
+  min-height: 40px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--ui);
+  font-size: 14px;
+}
+
+.exp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.exp-card {
+  margin: 14px 0 8px;
+  padding: 12px 18px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.exp-card[hidden] {
+  display: none;
+}
+
+.exp-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-family: var(--display);
+  font-size: 17px;
+}
+
+.exp-x {
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--pill);
+}
+
+.exp-help {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.exp-q {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--label);
+  margin-right: 6px;
+}
+
+.exp-fields,
+.exp-tlx,
+.exp-later {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 10px 0 0;
+  padding: 0;
+  border: none;
+}
+
+.exp-fields label,
+.exp-tlx label,
+.exp-later label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.exp-tlx legend,
+.exp-later legend {
+  padding: 0;
+  margin-bottom: 4px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--label);
+}
+
+.exp-tlx label {
+  display: grid;
+  grid-template-columns: 9.5rem minmax(0, 1fr) 2.5rem;
+  align-items: center;
+  gap: 8px;
+}
+
+.exp-tlx output {
+  font-size: 13px;
+  color: var(--muted);
+  text-align: right;
+}
+
+.exp-tlx input[type="range"].untouched {
+  opacity: 0.55;
+}
+
+.exp-later select {
+  max-width: 14rem;
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--ui);
+  font-size: 14px;
+}
+
+.exp-card .goal-chip:focus-visible,
+.exp-x:focus-visible,
+.exp-input:focus-visible,
+#experiment summary:focus-visible {
+  outline: 2px solid var(--ink-btn);
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  .exp-card .goal-chip,
+  .exp-actions button,
+  .exp-input,
+  .exp-later select,
+  .exp-x {
+    min-height: 44px;
+  }
+  .exp-x {
+    min-width: 44px;
+  }
+  .exp-tlx input[type="range"] {
+    height: 44px;
+  }
+}
+
+@media (max-width: 560px) {
+  .exp-tlx label {
+    grid-template-columns: minmax(0, 1fr) 2.5rem;
+  }
+  .exp-tlx label input[type="range"] {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}

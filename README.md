@@ -67,6 +67,7 @@ A folding panel on the home page asks about energy, mood, sleep, caffeine and me
 
 ### Other details
 
+- **Experiment:** an optional, collapsed section on the home page for the two-week check in [`docs/experiment.md`](docs/experiment.md): set the condition, phase and a document label, then get a small "did it help?" card after each document. Off by default and invisible in the reader.
 - **Rebuild and interrupted builds:** the ⋯ menu in the header rebuilds the open document with the latest improvements (after asking: it uses one full build of your model usage), and says when a document was built by an older version. A build that was cut off when Riemann stopped offers to start again instead of failing to open.
 - **Maths:** `$...$` and `$$...$$` LaTeX is drawn with KaTeX (from a CDN; if it does not load you see the LaTeX text). Prices like "$5 and $10" are left alone, and highlights around a formula keep working.
 - **Search:** press `/` or Ctrl+F (or click the magnifier) to search the whole document, including parts you have not opened. Enter and Shift+Enter step through matches; each opens just enough to show it and marks it in the text. Esc closes. Only the length of what you type is logged.

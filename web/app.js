@@ -129,7 +129,25 @@
   // Event log — batched POST /api/events every 5s, sendBeacon on pagehide
   // ---------------------------------------------------------------------
   function logEvent(type, data) {
+    if (state.tree && session.openedAt) {
+      if (type === "dial" && session.firstZoomMs == null) session.firstZoomMs = Date.now() - session.openedAt;
+      if (type === "jump_source" || type === "hover_source") session.sourceChecks += 1;
+    }
     state.events.push(Object.assign({ type }, data));
+  }
+
+  // The numbers of one reading session, sent with the `close` event (docs/experiment.md).
+  const session = { openedAt: 0, firstZoomMs: null, maxZ: 0, sourceChecks: 0 };
+
+  function closePayload() {
+    const out = { tree_id: state.tree.id };
+    if (session.openedAt) {
+      out.session_ms = Math.max(0, Date.now() - session.openedAt);
+      if (session.firstZoomMs != null) out.first_zoom_ms = session.firstZoomMs;
+      out.max_z = Math.min(1, Math.max(0, session.maxZ));
+      out.source_checks = session.sourceChecks;
+    }
+    return Object.assign(out, experimentTags());
   }
 
   function flushEvents(useBeacon) {
@@ -150,7 +168,7 @@
 
   setInterval(() => flushEvents(false), 5000);
   window.addEventListener("pagehide", () => {
-    if (state.tree) logEvent("close", { tree_id: state.tree.id });
+    if (state.tree) logEvent("close", closePayload());
     flushEvents(true);
   });
   document.addEventListener("visibilitychange", () => {
@@ -376,6 +394,7 @@
     const valuetext = `about ${minutes} minute${minutes === 1 ? "" : "s"}, ${pct} percent of original`;
     $dial.setAttribute("aria-valuetext", valuetext);
     $dial.setAttribute("aria-valuenow", String(Math.round(state.z * 100)));
+    if (Number.isFinite(state.z)) session.maxZ = Math.max(session.maxZ, state.z);
     scheduleAnnounce(valuetext);
   }
 
@@ -2831,7 +2850,8 @@
     }
 
     histReset();
-    logEvent("open", { tree_id: tree.id, resumed: !!saved });
+    Object.assign(session, { openedAt: Date.now(), firstZoomMs: null, maxZ: Number.isFinite(state.z) ? state.z : 0, sourceChecks: 0 });
+    logEvent("open", Object.assign({ tree_id: tree.id, resumed: !!saved }, experimentTags()));
     flushEvents(false);
     ensureOverview(tree);
 
@@ -2895,7 +2915,7 @@
   function leaveDocument() {
     if (state.tree && $app.classList.contains("active")) {
       savePosition();
-      logEvent("close", { tree_id: state.tree.id });
+      logEvent("close", closePayload());
       flushEvents(false);
     }
     closeSearch();
@@ -2918,7 +2938,9 @@
 
   function showStartScreen() {
     stopLoading();
+    const closedTree = state.tree && $app.classList.contains("active") ? state.tree.id : null;
     leaveDocument();
+    if (closedTree) setTimeout(() => showExperimentPrompt(closedTree), 0);
     $loading.hidden = true;
     $loading.classList.remove("interrupted");
     $startScreen.style.display = "";
@@ -3589,6 +3611,218 @@
       build();
     }
   });
+
+  // Experiment (home page; docs/experiment.md) ---------------------------------
+  // The two-week ABAB check: set the condition (A = the original, B = Riemann), the phase
+  // (A1, B1, A2, B2) and an optional label for the document. While it is on, `open` and
+  // `close` events carry them, and after a document closes a small dismissible card asks
+  // "Did it help?" and offers the outcome numbers. Off by default, local, and the whole
+  // section is a collapsed <details>; nothing shows in the reader.
+  const EXP_KEY = "riemann:experiment";
+  const EXP_PHASES = ["A1", "B1", "A2", "B2"];
+  const exp = { condition: null, phase: null, doc_label: "" };
+  let expLastTree = null; // the document whose session just ended (for the "did it help" answer)
+
+  function cleanLabel(v) {
+    return typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 80) : "";
+  }
+
+  function loadExperiment() {
+    try {
+      const p = JSON.parse(localStorage.getItem(EXP_KEY) || "null");
+      if (!p || typeof p !== "object") return;
+      const cond = p.condition === "A" || p.condition === "B" ? p.condition : null;
+      const phase = typeof p.phase === "string" && EXP_PHASES.includes(p.phase) && (!cond || p.phase[0] === cond) ? p.phase : null;
+      if (!cond && !phase) return;
+      exp.condition = cond || phase[0];
+      exp.phase = phase;
+      exp.doc_label = cleanLabel(p.doc_label);
+    } catch (e) {}
+  }
+
+  function saveExperiment() {
+    try {
+      if (experimentOn()) localStorage.setItem(EXP_KEY, JSON.stringify(exp));
+      else localStorage.removeItem(EXP_KEY);
+    } catch (e) {}
+  }
+
+  function experimentOn() {
+    return !!exp.condition;
+  }
+
+  // condition, phase and label for events (empty when the experiment is off)
+  function experimentTags() {
+    if (!experimentOn()) return {};
+    const t = { condition: exp.condition };
+    if (exp.phase) t.phase = exp.phase;
+    if (exp.doc_label) t.doc_label = exp.doc_label;
+    return t;
+  }
+
+  function renderExperiment() {
+    el("experiment-state").textContent = experimentOn() ? [exp.phase || exp.condition, exp.doc_label].filter(Boolean).join(" · ") : "off";
+    for (const b of el("exp-condition").querySelectorAll("[data-cond]")) {
+      b.setAttribute("aria-checked", String(b.dataset.cond === exp.condition));
+      b.classList.toggle("on", b.dataset.cond === exp.condition);
+    }
+    for (const b of el("exp-phase").querySelectorAll("[data-phase]")) {
+      b.setAttribute("aria-checked", String(b.dataset.phase === exp.phase));
+      b.classList.toggle("on", b.dataset.phase === exp.phase);
+    }
+    if (document.activeElement !== el("exp-label")) el("exp-label").value = exp.doc_label;
+    el("exp-start").textContent = experimentOn() ? "Update" : "Start";
+    el("exp-end").hidden = !experimentOn();
+    el("exp-outcome-open").hidden = !experimentOn();
+  }
+
+  function expMessage(text) {
+    const m = el("exp-msg");
+    m.textContent = text || "";
+    m.hidden = !text;
+  }
+
+  el("exp-condition").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-cond]");
+    if (!b) return;
+    exp.condition = b.dataset.cond;
+    if (exp.phase && exp.phase[0] !== exp.condition) exp.phase = null;
+    renderExperiment();
+  });
+  el("exp-phase").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-phase]");
+    if (!b) return;
+    exp.phase = b.dataset.phase;
+    exp.condition = exp.phase[0];
+    renderExperiment();
+  });
+  el("exp-start").addEventListener("click", () => {
+    if (!exp.condition) return expMessage("Choose A or B first (or a phase).");
+    exp.doc_label = cleanLabel(el("exp-label").value);
+    saveExperiment();
+    const ev = { action: "set", condition: exp.condition };
+    if (exp.phase) ev.phase = exp.phase;
+    if (exp.doc_label) ev.doc_label = exp.doc_label;
+    logEvent("experiment", ev);
+    flushEvents(false);
+    renderExperiment();
+    expMessage(`Recording for ${[exp.phase || "condition " + exp.condition, exp.doc_label].filter(Boolean).join(", ")}.`);
+  });
+  el("exp-end").addEventListener("click", () => {
+    logEvent("experiment", { action: "end" });
+    flushEvents(false);
+    exp.condition = null;
+    exp.phase = null;
+    exp.doc_label = "";
+    saveExperiment();
+    hideExperimentCards();
+    renderExperiment();
+    expMessage("Experiment ended.");
+  });
+
+  function hideExperimentCards() {
+    el("exp-prompt").hidden = true;
+    el("exp-outcome").hidden = true;
+  }
+
+  // After a document closes (experiment on): "Did it help?" (for Riemann sessions) and the numbers.
+  function showExperimentPrompt(treeId) {
+    if (!experimentOn() || !treeId) return;
+    expLastTree = treeId;
+    const card = el("exp-prompt");
+    el("exp-help").hidden = exp.condition !== "B";
+    el("exp-help-q").textContent = "Did it help?";
+    for (const b of el("exp-help").querySelectorAll("[data-help]")) b.disabled = false;
+    card.hidden = false;
+  }
+
+  el("exp-help").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-help]");
+    if (!b || !expLastTree) return;
+    logEvent("did_it_help", Object.assign({ tree_id: expLastTree, value: b.dataset.help === "yes" }, experimentTags()));
+    flushEvents(false);
+    el("exp-help-q").textContent = "Thanks, noted.";
+    for (const x of el("exp-help").querySelectorAll("[data-help]")) x.disabled = true;
+  });
+  el("exp-prompt-dismiss").addEventListener("click", () => (el("exp-prompt").hidden = true));
+
+  function openOutcomeForm() {
+    const f = el("exp-outcome");
+    el("out-label").value = exp.doc_label;
+    el("exp-outcome-msg").hidden = true;
+    f.hidden = false;
+    f.scrollIntoView({ block: "nearest" });
+    el("out-label").focus();
+  }
+  el("exp-prompt-numbers").addEventListener("click", openOutcomeForm);
+  el("exp-outcome-open").addEventListener("click", openOutcomeForm);
+  el("exp-outcome-close").addEventListener("click", () => (el("exp-outcome").hidden = true));
+  el("exp-outcome-cancel").addEventListener("click", () => (el("exp-outcome").hidden = true));
+
+  for (const r of el("exp-outcome").querySelectorAll("input[type=range]")) {
+    r.classList.add("untouched");
+    const out = r.parentElement.querySelector("output");
+    out.textContent = "–";
+    r.addEventListener("input", () => {
+      r.classList.remove("untouched");
+      r.dataset.touched = "1";
+      out.textContent = r.value;
+    });
+  }
+
+  el("exp-outcome").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const msg = el("exp-outcome-msg");
+    const label = cleanLabel(el("out-label").value);
+    const out = { doc_label: label };
+    const num = (id, lo, hi, intOnly) => {
+      const raw = el(id).value.trim();
+      if (raw === "") return undefined;
+      const v = Number(raw);
+      if (!Number.isFinite(v) || v < lo || v > hi || (intOnly && !Number.isInteger(v))) return null;
+      return v;
+    };
+    const fields = [
+      ["minutes_to_know", num("out-minutes", 0, 1440)],
+      ["checklist_score", num("out-checklist", 0, 5, true)],
+      ["minutes_to_first_action", num("out-first-action", 0, 20160)],
+    ];
+    for (const [k, v] of fields) {
+      if (v === null) {
+        msg.textContent = "One of the numbers is out of range.";
+        msg.hidden = false;
+        return;
+      }
+      if (v !== undefined) out[k] = v;
+    }
+    for (const r of el("exp-outcome").querySelectorAll("input[type=range][data-touched]")) out[r.dataset.tlx] = Number(r.value);
+    if (el("out-missed").value) out.missed_later = el("out-missed").value === "yes";
+    if (el("out-started").value) out.started_within_24h = el("out-started").value === "yes";
+    if (!label) {
+      msg.textContent = "Give it a label so these numbers can be matched with the document (no document text).";
+      msg.hidden = false;
+      return;
+    }
+    if (Object.keys(out).length === 1) {
+      msg.textContent = "Fill in at least one number.";
+      msg.hidden = false;
+      return;
+    }
+    logEvent("outcome", Object.assign(out, experimentTags(), { doc_label: label }));
+    flushEvents(false);
+    el("exp-outcome").hidden = true;
+    el("exp-outcome").reset();
+    for (const r of el("exp-outcome").querySelectorAll("input[type=range]")) {
+      r.classList.add("untouched");
+      delete r.dataset.touched;
+      r.parentElement.querySelector("output").textContent = "–";
+    }
+    expMessage("Outcome saved.");
+    el("experiment").open = true;
+  });
+
+  loadExperiment();
+  renderExperiment();
 
   // Recent documents ----------------------------------------------------
   function timeAgo(seconds) {

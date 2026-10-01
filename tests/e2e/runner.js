@@ -226,6 +226,7 @@ const checks = {
       localStorage.setItem("riemann:cols", '{"open":"x","closed":{"left":"<b>","rail":1e999}}');
       localStorage.setItem("riemann:checkin", '{"ts":"x","capacity":{"a":1}}');
       localStorage.setItem("riemann:reading", '{"spacing":"<b>yes","width":"constructor"}');
+      localStorage.setItem("riemann:experiment", '{"condition":"Z","phase":"<img src=x onerror=window.__pwn=1>","doc_label":"<b onmouseover=window.__pwn=1>x"}');
     }, TREE);
     await openReader(page);
     await page.reload();
@@ -241,8 +242,9 @@ const checks = {
       readEm: getComputedStyle(document.documentElement).getPropertyValue("--read-em").trim(),
       readLs: getComputedStyle(document.documentElement).getPropertyValue("--reading-ls").trim(),
       spacingOn: document.querySelector("#ls-toggle").getAttribute("aria-pressed"),
+      expState: document.querySelector("#experiment-state").textContent,
     }));
-    return { ok: r.pwn === 0 && r.imgs === 0 && (r.nodes > 0 || r.hero) && r.readEm === "40" && r.readLs === "0" && r.spacingOn === "false", ...r };
+    return { ok: r.pwn === 0 && r.imgs === 0 && (r.nodes > 0 || r.hero) && r.readEm === "40" && r.readLs === "0" && r.spacingOn === "false" && r.expState === "off", ...r };
   },
 
   async xss_payload_in_tree_text_is_escaped(page) {
@@ -710,6 +712,88 @@ const checks = {
       /interrupted/i.test(shown.heading) && /This build was interrupted \(Riemann restarted\)\. Build it again\?/.test(shown.text) &&
       !shown.startError && !shown.startShown && shown.steps === "none" && done.hash === "#/t/" + id;
     return { ok, shown, done };
+  },
+
+  async experiment_is_invisible_when_off_and_records_session_numbers(page) {
+    const id = await buildText(longDoc());
+    const sent = [];
+    page.on("request", (r) => {
+      if (r.url().endsWith("/api/events") && r.method() === "POST") {
+        try { sent.push(...JSON.parse(r.postData() || "[]")); } catch (e) {}
+      }
+    });
+    await page.goto(BASE + "/");
+    await page.waitForTimeout(400);
+    const off = await page.evaluate(() => ({
+      open: document.querySelector("#experiment").open,
+      state: document.querySelector("#experiment-state").textContent,
+      prompt: !document.querySelector("#exp-prompt").hidden,
+      form: !document.querySelector("#exp-outcome").hidden,
+    }));
+    await openReader(page, id);
+    for (let i = 0; i < 4; i++) { await page.keyboard.press("="); await page.waitForTimeout(150); }
+    await page.waitForTimeout(300);
+    await page.click("#home-btn");
+    await page.waitForTimeout(500);
+    const promptOff = await page.evaluate(() => !document.querySelector("#exp-prompt").hidden);
+    await page.evaluate(() => fetch("/api/events", { method: "POST", headers: { "content-type": "application/json" }, body: "[]" }));
+    const close = sent.find((e) => e.type === "close");
+    const numbers =
+      close && typeof close.session_ms === "number" && close.session_ms >= 0 && typeof close.first_zoom_ms === "number" &&
+      close.first_zoom_ms <= close.session_ms && close.max_z >= 0 && close.max_z <= 1 && Number.isInteger(close.source_checks) && !("condition" in close);
+    return { ok: !off.open && off.state === "off" && !off.prompt && !off.form && !promptOff && !!numbers, off, promptOff, close };
+  },
+
+  async experiment_switch_prompts_and_outcome_events(page) {
+    const id = await buildText(longDoc());
+    const sent = [];
+    page.on("request", (r) => {
+      if (r.url().endsWith("/api/events") && r.method() === "POST") {
+        try { sent.push(...JSON.parse(r.postData() || "[]")); } catch (e) {}
+      }
+    });
+    await page.goto(BASE + "/");
+    await page.click("#experiment summary");
+    await page.click('[data-phase="B1"]');
+    const cond = await page.evaluate(() => document.querySelector('[data-cond="B"]').getAttribute("aria-checked"));
+    await page.fill("#exp-label", "week1-brief");
+    await page.click("#exp-start");
+    await page.reload();
+    const kept = await page.evaluate(() => document.querySelector("#experiment-state").textContent);
+    await openReader(page, id);
+    for (let i = 0; i < 3; i++) { await page.keyboard.press("="); await page.waitForTimeout(150); }
+    await page.click("#home-btn");
+    await page.waitForSelector("#exp-prompt:not([hidden])", { timeout: 4000 });
+    await page.click('[data-help="yes"]');
+    await page.click("#exp-prompt-dismiss");
+    const dismissed = await page.evaluate(() => document.querySelector("#exp-prompt").hidden);
+    // the outcome numbers: only what is filled in is sent
+    await page.click("#experiment summary");
+    await page.click("#exp-outcome-open");
+    await page.fill("#out-minutes", "7");
+    await page.fill("#out-checklist", "4");
+    await page.evaluate(() => { const r = document.querySelector('[data-tlx="tlx_effort"]'); r.value = "35"; r.dispatchEvent(new Event("input", { bubbles: true })); });
+    await page.selectOption("#out-missed", "no");
+    await page.click('#exp-outcome button[type="submit"]');
+    await page.waitForTimeout(300);
+    await page.click("#exp-end");
+    const endState = await page.evaluate(() => ({ state: document.querySelector("#experiment-state").textContent, stored: localStorage.getItem("riemann:experiment") }));
+    await page.evaluate(() => fetch("/api/events", { method: "POST", headers: { "content-type": "application/json" }, body: "[]" }));
+    const by = (t) => sent.filter((e) => e.type === t);
+    const set = by("experiment").find((e) => e.action === "set");
+    const end = by("experiment").find((e) => e.action === "end");
+    const help = by("did_it_help")[0];
+    const outcome = by("outcome")[0];
+    const close = by("close")[0];
+    const ok =
+      cond === "true" && set && set.condition === "B" && set.phase === "B1" && set.doc_label === "week1-brief" && end &&
+      /B1/.test(kept) && /week1-brief/.test(kept) && dismissed &&
+      help && help.value === true && help.tree_id === id && help.condition === "B" &&
+      outcome && outcome.doc_label === "week1-brief" && outcome.minutes_to_know === 7 && outcome.checklist_score === 4 &&
+      outcome.tlx_effort === 35 && !("tlx_mental" in outcome) && outcome.missed_later === false && !("started_within_24h" in outcome) &&
+      close && close.condition === "B" && close.phase === "B1" && close.doc_label === "week1-brief" && typeof close.session_ms === "number" &&
+      endState.state === "off" && endState.stored === null;
+    return { ok, set, end, kept, help, outcome, close, endState };
   },
 
   async failed_build_shows_message_and_retries(page) {

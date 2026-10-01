@@ -107,6 +107,87 @@
       </div>
     </details>
 
+    <details class="checkin experiment" id="experiment">
+      <summary><span class="checkin-title">Experiment</span><span class="checkin-opt" id="experiment-state">off</span></summary>
+      <div class="checkin-body">
+        <p class="composer-note checkin-note">A two-week check on whether reading in Riemann helps you (see <code>docs/experiment.md</code>). Off until you start a phase; it stays on this device.</p>
+        <div class="checkin-group" role="radiogroup" aria-label="Condition">
+          <span class="checkin-label">Condition</span>
+          <div class="checkin-opts" id="exp-condition">
+            <button type="button" role="radio" class="goal-chip" data-cond="A" aria-checked="false">A &middot; the original</button>
+            <button type="button" role="radio" class="goal-chip" data-cond="B" aria-checked="false">B &middot; Riemann</button>
+          </div>
+        </div>
+        <div class="checkin-group" role="radiogroup" aria-label="Phase">
+          <span class="checkin-label">Phase</span>
+          <div class="checkin-opts" id="exp-phase">
+            <button type="button" role="radio" class="goal-chip" data-phase="A1" aria-checked="false">A1</button>
+            <button type="button" role="radio" class="goal-chip" data-phase="B1" aria-checked="false">B1</button>
+            <button type="button" role="radio" class="goal-chip" data-phase="A2" aria-checked="false">A2</button>
+            <button type="button" role="radio" class="goal-chip" data-phase="B2" aria-checked="false">B2</button>
+          </div>
+        </div>
+        <div class="checkin-group">
+          <label class="checkin-label" for="exp-label">Document label</label>
+          <input id="exp-label" class="exp-input" type="text" maxlength="80" placeholder="optional, e.g. week1-brief (no document text)" autocomplete="off" />
+        </div>
+        <div class="exp-actions">
+          <button type="button" id="exp-start" class="primary-btn">Start</button>
+          <button type="button" id="exp-outcome-open" class="ghost-btn" hidden>Add outcome numbers</button>
+          <button type="button" id="exp-end" class="ghost-btn" hidden>End experiment</button>
+        </div>
+        <p id="exp-msg" class="composer-note" role="status" hidden></p>
+      </div>
+    </details>
+
+    <section id="exp-prompt" class="exp-card" aria-label="Experiment: how did that go?" hidden>
+      <div class="exp-card-head">
+        <strong id="exp-prompt-title">How did that go?</strong>
+        <button type="button" id="exp-prompt-dismiss" class="exp-x" aria-label="Dismiss">&times;</button>
+      </div>
+      <div class="exp-help" id="exp-help">
+        <span class="exp-q" id="exp-help-q">Did it help?</span>
+        <button type="button" class="goal-chip" data-help="yes">Yes</button>
+        <button type="button" class="goal-chip" data-help="no">No</button>
+      </div>
+      <button type="button" id="exp-prompt-numbers" class="checkin-clear">Add the numbers</button>
+    </section>
+
+    <form id="exp-outcome" class="exp-card" aria-label="Experiment outcome" hidden>
+      <div class="exp-card-head">
+        <strong>Outcome numbers</strong>
+        <button type="button" id="exp-outcome-close" class="exp-x" aria-label="Close">&times;</button>
+      </div>
+      <p class="composer-note">Every field is optional; only what you fill in is saved. Fill in the rest later with the same label.</p>
+      <div class="exp-fields">
+        <label>Document label <input id="out-label" class="exp-input" type="text" maxlength="80" autocomplete="off" /></label>
+        <label>Minutes until &ldquo;I know what to do&rdquo; <input id="out-minutes" class="exp-input" type="number" min="0" max="1440" step="any" inputmode="decimal" /></label>
+        <label>Checklist score (0 to 5) <input id="out-checklist" class="exp-input" type="number" min="0" max="5" step="1" inputmode="numeric" /></label>
+      </div>
+      <fieldset class="exp-tlx">
+        <legend>Effort, 0 to 100 (move a slider to include it)</legend>
+        <label>Mental demand <input type="range" min="0" max="100" value="50" data-tlx="tlx_mental" /><output></output></label>
+        <label>Physical demand <input type="range" min="0" max="100" value="50" data-tlx="tlx_physical" /><output></output></label>
+        <label>Hurry <input type="range" min="0" max="100" value="50" data-tlx="tlx_temporal" /><output></output></label>
+        <label>How well it went <input type="range" min="0" max="100" value="50" data-tlx="tlx_performance" /><output></output></label>
+        <label>Effort <input type="range" min="0" max="100" value="50" data-tlx="tlx_effort" /><output></output></label>
+        <label>Frustration <input type="range" min="0" max="100" value="50" data-tlx="tlx_frustration" /><output></output></label>
+      </fieldset>
+      <fieldset class="exp-later">
+        <legend>A week later</legend>
+        <label>Did I find I had missed something?
+          <select id="out-missed"><option value="">no answer</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+        <label>Did I start within 24 hours?
+          <select id="out-started"><option value="">no answer</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+        <label>Minutes from first opening it to the first real action <input id="out-first-action" class="exp-input" type="number" min="0" max="20160" step="any" inputmode="decimal" /></label>
+      </fieldset>
+      <p id="exp-outcome-msg" class="composer-note" role="alert" hidden></p>
+      <div class="exp-actions">
+        <button type="submit" class="primary-btn">Save</button>
+        <button type="button" id="exp-outcome-cancel" class="ghost-btn">Cancel</button>
+      </div>
+    </form>
+
     <section id="recent-block" class="recent" hidden>
       <h2 class="recent-heading">Pick up where you left off</h2>
       <ul id="recent-list" class="recent-grid"></ul>
