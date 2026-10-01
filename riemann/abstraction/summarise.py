@@ -325,6 +325,24 @@ _GOAL_TITLE_PREFIX = {
 
 _TARGET_RE = re.compile(r"Target length: about (\d+) words")
 _LEAF_BLOCK_RE = re.compile(r"^--- leaf (\S+) ---\n(.*?)(?=^--- leaf |\n\nLeaf ids you may cite)", re.MULTILINE | re.DOTALL)
+_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+_MONTH_ALT = "|".join(_MONTHS)
+_DMY_RE = re.compile(rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+(?:of\s+)?({_MONTH_ALT})(?:\s+(\d{{4}}))?")
+_MDY_RE = re.compile(rf"\b({_MONTH_ALT})\s+(\d{{1,2}})(?:st|nd|rd|th)?(?:,?\s+(\d{{4}}))?")
+_TIME_RE = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", re.IGNORECASE)
+def _fake_date(text: str) -> tuple[str, str] | None:
+    """(phrase, iso) for the first date written in text: "14 November 2025", "November 14"; the iso is
+    "YYYY-MM-DD", or "MM-DD" when the text gives no year."""
+    m = _DMY_RE.search(text)
+    if m:
+        day, month, year = int(m.group(1)), _MONTHS.index(m.group(2)) + 1, m.group(3)
+    else:
+        m = _MDY_RE.search(text)
+        if not m:
+            return None
+        day, month, year = int(m.group(2)), _MONTHS.index(m.group(1)) + 1, m.group(3)
+    iso = f"{year}-{month:02d}-{day:02d}" if year else f"{month:02d}-{day:02d}"
+    return m.group(0), iso
 _CHILD_IDS_RE = re.compile(r"^Child ids \(in order\): (.*)$", re.MULTILINE)
 _SHORT_IDS_RE = re.compile(r"^Short-title node ids: (.*)$", re.MULTILINE)
 _LEAF_IDS_RE = re.compile(r"^Leaf ids you may cite \(in order\): (.*)$", re.MULTILINE)
@@ -353,7 +371,10 @@ class FakeSummariser:
     def _overview(self, prompt: str, system: str) -> str:
         """Deterministic overview: title from the "Document title" line, values
         are the first alphabetic words of the first shown leaf (so the number
-        validator never trips), cited to that leaf."""
+        validator never trips), cited to that leaf. When the prompt asks for the
+        do-it fields, example values are built from the source itself: the first
+        date written in a leaf becomes the deadline (year-less when the source
+        gives no year) and the first "N words" the size basis."""
         title_match = re.search(r"^Document title \(as extracted\): (.*)$", prompt, re.MULTILINE)
         doc_title = (title_match.group(1).strip() if title_match else "") or "Untitled"
         leaf_match = _LEAF_IDS_RE.search(prompt)
@@ -381,7 +402,34 @@ class FakeSummariser:
             from riemann.abstraction.genre import detect_genre
 
             out["genre"] = detect_genre(doc_title, "\n".join(t for _, t in blocks))[0] or "other"
+        if "Do-it fields." in system and first_leaf:
+            out.update(self._do_it(blocks, words, first_leaf[0]))
         return json.dumps(out)
+
+    @staticmethod
+    def _do_it(blocks: list[tuple[str, str]], words: list[str], first_id: str) -> dict:
+        start_here = {"text": " ".join(words[:8]), "cites": [first_id]} if words else None
+        size = None
+        for lid, text in blocks:
+            m = re.search(r"\b(\d[\d,]*)[- ]words?\b", text)
+            if m:
+                size = {"text": "About 2 sessions of 1 hour", "basis": f"a {m.group(1)} words limit", "cites": [lid]}
+                break
+        if size is None and words:
+            size = {"text": "About 2 sessions of 1 hour", "basis": " ".join(words[:5]), "cites": [first_id]}
+        deadline = None
+        ordered = sorted(blocks, key=lambda b: 0 if re.search(r"\b(due|deadline)\b", b[1], re.IGNORECASE) else 1)
+        for lid, text in ordered:
+            found = _fake_date(text)
+            if found:
+                tm = _TIME_RE.search(text)
+                hhmm = None
+                if tm:
+                    h = int(tm.group(1)) % 12 + (12 if tm.group(3).lower() == "pm" else 0)
+                    hhmm = f"{h:02d}:{int(tm.group(2) or 0):02d}"
+                deadline = {"iso": found[1], "time": hhmm, "label": "Due date", "cites": [lid]}
+                break
+        return {"start_here": start_here, "size_of_job": size, "deadline": deadline}
 
     async def summarise(self, prompt: str, system: str) -> str:
         combined = system + "\n" + prompt

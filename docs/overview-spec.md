@@ -140,3 +140,32 @@ order). It is added to the summary, root and overview prompts before the goal's 
 still decides what to emphasise. `GENRE_ESSENTIALS` gives the overview its labels (a paper: Question, Method and sample,
 Main result, Limits); the goal's hint follows it.
 
+### "Do it" overview fields (`Tree.overview`)
+
+For a task-like document (`genre` is `assignment` or `meeting`, or the goal is `execute` or `plan`) the overview has
+three more optional fields. All are `null` (never `""`) when the source does not support them; every one is
+cited (`cites` are real leaf ids, each `¶` link opens that leaf) and passes the number, date and overlap checks above.
+
+    "start_here":  {"text": "Download the dataset and starter notebook from Moodle, then run the first three cells.",
+                    "cites": ["n4d33..."]}
+    "size_of_job": {"text": "About 3 sessions of 2 hours",
+                    "basis": "an 1,800-word report, 8 pages, a notebook and 3 sites",
+                    "cites": ["n2a7a...", "nead8..."]}
+    "deadline":    {"iso": "2025-11-14", "time": "17:00", "label": "Report PDF and zipped notebook",
+                    "cites": ["nead8..."], "year_inferred": false}
+
+- `start_here.text`: one concrete first step doable in about ten minutes, at most 25 words.
+- `size_of_job.text`: a rough estimate of the effort, at most 20 words; the model's own words, so its numbers are
+  not matched against the source. `basis` is what it rests on, in the source's quantities (every number in it is in the
+  cited leaves): show it as the "why", for example beneath the estimate.
+- `deadline`: the single main deadline. `iso` is `YYYY-MM-DD` and the day number and month are in a cited leaf.
+  `time` is `"HH:MM"` (24 h) or `null` (dropped when no matching clock time is in the cited leaves). `year_inferred`
+  is `true` when the source gives no year (or the model left it out): `iso` then uses the year the context implies, or
+  the next occurrence of that day counted from the day of the build; a year the source states must match. The browser
+  computes "in N days" from `iso` (and `time`) and today's date; nothing here counts down.
+
+**Act-first order.** `essentials` are sorted by what the reader must act on first, by label: deadline labels (Due,
+Deadline, Reply by, Submit by ...), then deliverable labels (Deliverables, What you need to do, The ask, Task ...),
+then first-step labels (Start here, First step, Next action), then everything else in the model's order. The prompt
+asks for the same order. The UI should show `start_here`, `deadline` and `size_of_job` before the essentials.
+

@@ -11,6 +11,7 @@ level*, done, error -- see docs/v1-build-spec.md.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import hashlib
 import logging
 import re
@@ -23,9 +24,10 @@ from riemann.abstraction.genre import (
     GENRE_FOCUS,
     GENRES,
     detect_genre,
+    is_task_like,
     valid_genre,
 )
-from riemann.abstraction.model import Essential, KeyFact, Node, Overview, Tree
+from riemann.abstraction.model import CitedText, Deadline, Essential, KeyFact, Node, Overview, SizeOfJob, Tree
 from riemann.abstraction.summarise import ModelError, Summariser, parse_json_robustly
 
 RATIO = 3  # compression per step; Forte's practitioner funnel suggests 2.5-4x (weak evidence)
@@ -646,8 +648,19 @@ Respond with ONLY JSON, no prose outside it and no markdown code fences:
 - plan: Milestones, Next action, Dependencies
 - email or message: The ask, From, Reply by
 - reference or guide: Covers, Key rules, Where to look
+Order the essentials by what the reader must act on first: the deadline, then what to hand in or do, then the first step, then reference information (weight, assessed on, rules, background).
 Every value must come from the source. Never invent or guess: if the source does not say (for example no due date is given), write exactly "not stated" for that value and leave its cites empty. Copy numbers, dates, weekday and month names and people's names exactly as the source writes them.
 "cites": leaf ids only, from the "Leaf ids you may cite" list, naming the leaves the value comes from. Every number, weekday and month in a value must appear in a cited leaf, and the value must be in words the cited leaves use."""
+
+# Added to the overview prompt for documents the reader has to act on (an assignment or task brief, meeting
+# notes, or an execute or plan goal). FakeSummariser detects the block through its first line.
+DO_IT_FIELDS = """Do-it fields. This reader has something to do. Add these three keys to the JSON object:
+ "start_here": {"text": "...", "cites": ["leaf_id", ...]}  (or null)
+ "size_of_job": {"text": "...", "basis": "...", "cites": ["leaf_id", ...]}  (or null)
+ "deadline": {"iso": "YYYY-MM-DD", "time": "HH:MM" or null, "label": "...", "cites": ["leaf_id", ...]}  (or null)
+"start_here": ONE concrete first step the reader can finish in about ten minutes, as a short imperative of at most 25 words (for example "Download the dataset and run the first three notebook cells"). Take it from the earliest step or instruction in the source; if the source gives no order, use the first thing it asks the reader to do. null when the source gives nothing to start on. Never invent a step.
+"size_of_job": a rough estimate of the EFFORT the whole job will take, in sessions, hours or days, at most 20 words (for example "About 3 sessions of 2 hours"); never a description of the deliverable. Base it ONLY on sizes the source states (pages, words, datasets, weeks, number of tasks) and copy those stated quantities exactly into "basis" (for example "a 1,800-word report, a notebook and 3 sites"). null when the source states no size.
+"deadline": the single main deadline the source states. "iso" is its date as YYYY-MM-DD, "time" its clock time as HH:MM on a 24-hour clock (or null), "label" says what is due in at most 8 words. If the source gives no year, use the year the context implies, or the next occurrence. Never guess a day or a month: the day number and the month must appear in a cited leaf. null when no deadline is stated."""
 
 GENRE_REQUEST = """Also add "genre": one of assignment, paper, news, email, meeting, legal, technical, article, other (the kind of document this is)."""
 
@@ -662,6 +675,14 @@ OVERVIEW_ESSENTIALS: dict[str, str] = {
     "communicate": "For this reader, prefer essentials like: The ask, From, Reply by, What is needed from you.",
 }
 
+START_HERE_MAX_WORDS = 25
+SIZE_OF_JOB_MAX_WORDS = 20
+SIZE_BASIS_MAX_WORDS = 30
+DEADLINE_LABEL_MAX_WORDS = 10
+
+
+def _today() -> datetime.date:
+    return datetime.date.today()
 
 
 def _essentials_hint(genre: str | None, objective: str | None) -> str:
@@ -678,6 +699,8 @@ def _overview_system(tree: Tree) -> str:
     system = OVERVIEW_SYSTEM
     if genre is None:
         system += "\n\n" + GENRE_REQUEST
+    if genre is None or is_task_like(genre, tree.objective):
+        system += "\n\n" + DO_IT_FIELDS
     system = with_focus(system, tree.objective, genre)
     hint = _essentials_hint(genre, tree.objective)
     return f"{system}\n\n{hint}" if hint else system
@@ -717,6 +740,33 @@ def _overview_prompt(tree: Tree) -> tuple[str, list[str]]:
     lines.append("")
     lines.append(f"Leaf ids you may cite (in order): {', '.join(shown)}")
     return "\n".join(lines), shown
+
+
+# Labels that say what the reader must act on first. Deadline first, then what to hand in or do, then the
+# first step; everything else is reference information and keeps the model's order.
+_DEADLINE_LABEL_RE = re.compile(r"\b(due|deadline|reply by|respond by|submit by|closing date|cut-?off|by when)\b", re.I)
+_DELIVERABLE_LABEL_RE = re.compile(
+    r"\b(deliverables?|hand[- ]?in|what to (?:submit|produce|do|hand)|what you need to do|what you must do|the ask|the decision|"
+    r"task verb|tasks?|actions?|what is needed|needed from you)\b",
+    re.I,
+)
+_FIRST_STEP_LABEL_RE = re.compile(r"\b(start here|first step|next action|next step)\b", re.I)
+
+
+def _essential_rank(label: str) -> int:
+    if _DEADLINE_LABEL_RE.search(label):
+        return 0
+    if _DELIVERABLE_LABEL_RE.search(label):
+        return 1
+    if _FIRST_STEP_LABEL_RE.search(label):
+        return 2
+    return 3
+
+
+def _sort_essentials(essentials: list[Essential]) -> list[Essential]:
+    """Act-first order: deadline, deliverables, first step, then reference information. Stable,
+    so within a group the model's order stands, and a document with none of those labels is untouched."""
+    return sorted(essentials, key=lambda e: _essential_rank(e.label))
 
 
 _NOT_STATED_RE = re.compile(r"^\s*not stated\b", re.I)
@@ -760,7 +810,90 @@ def _clean_essentials(raw: object, nodes: dict[str, Node], all_leaf_ids: set[str
     return out
 
 
-def _clean_overview(raw: object, tree: Tree, warn: Warn | None = None) -> Overview | None:
+def _valid_cites(raw: object, leaf_ids: set[str]) -> list[str]:
+    if not isinstance(raw, dict):
+        return []
+    cites = raw.get("cites")
+    return [c for c in cites if isinstance(c, str) and c in leaf_ids] if isinstance(cites, list) else []
+
+
+def _clean_start_here(raw: object, nodes: dict[str, Node], leaf_ids: set[str], warn: Warn | None) -> CitedText | None:
+    """One first step: cited, at most 25 words, and supported by its cited leaves."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("text"), str) or not raw["text"].strip():
+        return None
+    cites = _valid_cites(raw, leaf_ids)
+    if not cites:
+        return None
+    text = _cap_chars(_truncate_words(raw["text"].strip(), START_HERE_MAX_WORDS), 300)
+    source = " ".join(nodes[c].text for c in cites)
+    if not _supported(text, source) or not checks.overlap_ok(text, source, CITE_OVERLAP_FLOOR):
+        return None
+    _warn_dropped_qualifier(warn, "start_here", text, source)
+    return CitedText(text=text, cites=cites)
+
+
+def _clean_size_of_job(raw: object, nodes: dict[str, Node], leaf_ids: set[str]) -> SizeOfJob | None:
+    """A rough estimate (the model's own words and numbers, at most 20 words) that must come with the
+    quantities it is based on: the basis is cited, and every number in it is in the cited leaves."""
+    if not isinstance(raw, dict):
+        return None
+    text, basis = raw.get("text"), raw.get("basis")
+    if not isinstance(text, str) or not text.strip() or not isinstance(basis, str) or not basis.strip():
+        return None
+    cites = _valid_cites(raw, leaf_ids)
+    if not cites:
+        return None
+    text = _cap_chars(_truncate_words(text.strip(), SIZE_OF_JOB_MAX_WORDS), 200)
+    basis = _cap_chars(_truncate_words(basis.strip(), SIZE_BASIS_MAX_WORDS), 300)
+    source = " ".join(nodes[c].text for c in cites)
+    if not _supported(basis, source) or not checks.overlap_ok(basis, source, CITE_OVERLAP_FLOOR):
+        return None
+    return SizeOfJob(text=text, basis=basis, cites=cites)
+
+
+def _resolve_date(iso: object, source: str, today: datetime.date) -> tuple[str, bool] | None:
+    """(YYYY-MM-DD, year_inferred) for a model-given date that the source supports: the day number and
+    the month appear in `source`. A year the source states must match; with no year in the source the
+    year is the model's and `year_inferred` is true; a year-less iso uses the year the source states,
+    else the next occurrence."""
+    parsed = checks.parse_iso(iso, today)
+    if parsed is None:
+        return None
+    day, inferred = parsed
+    if not checks.date_in_source(day, source):
+        return None
+    years = checks.years_in(source)
+    if inferred and len(years) == 1:  # the model left the year out and the source states one
+        try:
+            day, inferred = day.replace(year=next(iter(years))), False
+        except ValueError:
+            return None
+    elif years and day.year not in years:
+        return None
+    elif not years:
+        inferred = True
+    return day.isoformat(), inferred
+
+
+def _clean_deadline(raw: object, nodes: dict[str, Node], leaf_ids: set[str], today: datetime.date) -> Deadline | None:
+    if not isinstance(raw, dict) or not isinstance(raw.get("label"), str) or not raw["label"].strip():
+        return None
+    cites = _valid_cites(raw, leaf_ids)
+    if not cites:
+        return None
+    source = " ".join(nodes[c].text for c in cites)
+    resolved = _resolve_date(raw.get("iso"), source, today)
+    if resolved is None:
+        return None
+    label = _cap_chars(_truncate_words(raw["label"].strip(), DEADLINE_LABEL_MAX_WORDS), 120)
+    if not _supported(label, source):
+        return None
+    time = raw.get("time")
+    time = time.strip() if isinstance(time, str) and checks.time_in_source(time.strip(), source) else None
+    return Deadline(iso=resolved[0], time=time, label=label, cites=cites, year_inferred=resolved[1])
+
+
+def _clean_overview(raw: object, tree: Tree, warn: Warn | None = None, today: datetime.date | None = None) -> Overview | None:
     if not isinstance(raw, dict):
         return None
     doc_title = raw.get("doc_title")
@@ -785,12 +918,21 @@ def _clean_overview(raw: object, tree: Tree, warn: Warn | None = None) -> Overvi
     if tree.genre is None:  # an older tree: the model's answer (or "other") settles it
         tree.genre = valid_genre(raw.get("genre")) or "other"
     all_leaf_ids = {i for i in _leaf_ids_in_order(tree)}
-    essentials = _clean_essentials(raw.get("essentials"), tree.nodes, all_leaf_ids, warn)
+    essentials = _sort_essentials(_clean_essentials(raw.get("essentials"), tree.nodes, all_leaf_ids, warn))
+    today = today or _today()
+    start_here = size_of_job = deadline = None
+    if is_task_like(tree.genre, tree.objective):
+        start_here = _clean_start_here(raw.get("start_here"), tree.nodes, all_leaf_ids, warn)
+        size_of_job = _clean_size_of_job(raw.get("size_of_job"), tree.nodes, all_leaf_ids)
+        deadline = _clean_deadline(raw.get("deadline"), tree.nodes, all_leaf_ids, today)
     return Overview(
         doc_title=doc_title,
         doc_kind=doc_kind,
         what_it_is=what,
         essentials=essentials,
+        start_here=start_here,
+        size_of_job=size_of_job,
+        deadline=deadline,
     )
 
 

@@ -32,6 +32,35 @@ class Essential(BaseModel):
     cites: list[str] = Field(default_factory=list)
 
 
+class CitedText(BaseModel):
+    """A short model-written line with the leaves it comes from (Overview.start_here)."""
+
+    text: str
+    cites: list[str] = Field(default_factory=list)
+
+
+class SizeOfJob(BaseModel):
+    """A rough estimate of the work ("about 3 sessions of 2 hours") and what it is
+    based on (`basis`, e.g. "a 2,000-word report and 4 datasets": every number in it
+    appears in the cited leaves)."""
+
+    text: str
+    basis: str
+    cites: list[str] = Field(default_factory=list)
+
+
+class Deadline(BaseModel):
+    """The single main deadline, checked against the cited leaves: the day number and the
+    month must appear there. `time` is "HH:MM" (24 h) when the source gives one. When the source
+    gives no year, `iso` uses the next occurrence of that day and `year_inferred` is true."""
+
+    iso: str
+    time: str | None = None
+    label: str
+    cites: list[str] = Field(default_factory=list)
+    year_inferred: bool = False
+
+
 class Overview(BaseModel):
     """The "what is this" card shown above section 01 at every zoom level:
     what kind of document it is, its real title, one plain sentence, and the
@@ -43,6 +72,12 @@ class Overview(BaseModel):
     doc_kind: str
     what_it_is: str
     essentials: list[Essential] = Field(default_factory=list)
+    start_here: CitedText | None = None
+    """One concrete first step, doable in about ten minutes (at most 25 words). Task-like documents only."""
+    size_of_job: SizeOfJob | None = None
+    """A rough estimate of the work (at most 20 words), with what it is based on. Task-like documents only."""
+    deadline: Deadline | None = None
+    """The single main deadline, if the source states one. Task-like documents only."""
 
 
 class Node(BaseModel):

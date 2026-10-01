@@ -386,7 +386,7 @@ async def test_overview_uses_goal_specific_essentials():
     builder = start_build("overview-exec", "Brief", _doc(1500), FakeSummariser(), objective="execute")
     await builder.task
     ov = builder.tree.overview
-    assert [e.label for e in ov.essentials] == ["Deliverables", "Due", "What you need to do"]
+    assert [e.label for e in ov.essentials] == ["Due", "Deliverables", "What you need to do"]  # act-first order
     assert ov.doc_kind == "Assignment brief"
 
 
