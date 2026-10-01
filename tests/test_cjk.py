@@ -27,7 +27,7 @@ def test_hangul_counts_its_space_separated_words():
 
 
 def test_mixed_text_counts_both():
-    assert word_count("Riemann 是一个阅读工具 for Sam") == 3 + 7  # Riemann, for, Sam + 7 characters
+    assert word_count("Riemann 是一个阅读工具 for Alex") == 3 + 7  # Riemann, for, Alex + 7 characters
     assert word_count("GPT-4 发布了") == 1 + 3
 
 

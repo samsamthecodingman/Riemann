@@ -30,7 +30,7 @@ def test_fixture_documents_are_detected_strongly(name, genre):
 
 
 def test_email_headers_are_decisive():
-    text = "From: Dana <d@example.org>\nTo: Sam <s@example.com>\nSubject: Start date\n\nHi Sam, please confirm your start date by Friday."
+    text = "From: Dana <d@example.org>\nTo: Alex <s@example.com>\nSubject: Start date\n\nHi Alex, please confirm your start date by Friday."
     assert detect_genre("Start date", text) == ("email", True)
 
 

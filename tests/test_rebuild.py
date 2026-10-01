@@ -74,7 +74,7 @@ async def test_rebuild_renormalises_the_stored_source(monkeypatch):
     async with await _client() as c:
         tid = await _build_via_api(c)
         tree = cache.load_tree(tid)
-        tree.source_text = "Subject: Re: x\nFrom: a@b.c\n\nThe new reply says the report is due Friday and needs the appendix attached.\n\nOn Tue, 14 Oct 2025 at 09:15, Sam <s@x.org> wrote:\n> old quoted text here that should go away\n"
+        tree.source_text = "Subject: Re: x\nFrom: a@b.c\n\nThe new reply says the report is due Friday and needs the appendix attached.\n\nOn Tue, 14 Oct 2025 at 09:15, Alex <s@x.org> wrote:\n> old quoted text here that should go away\n"
         cache.path_for(tid).write_text(tree.model_dump_json())
         build.BUILDS.clear()  # as after a restart
         r = await c.post(f"/api/tree/{tid}/rebuild")

@@ -4,11 +4,11 @@ from riemann.abstraction import ingest
 from riemann.abstraction.normalise import looks_like_email, strip_email_noise
 
 THREAD = """From: Dana Whitfield <dana@example.org>
-To: Sam Roberts <sam@example.com>
+To: Alex Morgan <alex@example.com>
 Subject: Re: Placement start date
 Date: Wed, 15 Oct 2025 16:42
 
-Hi Sam,
+Hi Alex,
 
 Thanks for getting back so quickly. Two things I need before I can lock this in. First, the signed placement agreement back by end of day Friday 24 October.
 
@@ -22,16 +22,16 @@ www.example.org
 
 This email and any attachments are confidential and may be privileged. If you are not the intended recipient, please notify the sender and delete it. Unauthorised use or disclosure is prohibited.
 
-On Tue, 14 Oct 2025 at 09:15, Sam Roberts <sam@example.com> wrote:
+On Tue, 14 Oct 2025 at 09:15, Alex Morgan <alex@example.com> wrote:
 > Hi Dana,
 >
 > Thanks for the details. I can start on 3 November as discussed, but I would need to leave at 3 pm on Thursdays.
 >
 > Thanks,
-> Sam
+> Alex
 
 On Mon, 13 Oct 2025 at 14:20, Dana Whitfield <dana@example.org> wrote:
->> Hi Sam,
+>> Hi Alex,
 >> Great news, your placement has been approved.
 """
 
@@ -49,11 +49,11 @@ def test_quoted_history_signature_and_disclaimer_are_removed_newest_message_stay
 
 def test_inline_replies_between_quoted_lines_are_kept():
     text = """From: Dana <d@example.org>
-To: Sam <s@example.com>
+To: Alex <s@example.com>
 Subject: Re: questions
 Date: Thu, 16 Oct 2025
 
-On Wed, 15 Oct 2025, Sam wrote:
+On Wed, 15 Oct 2025, Alex wrote:
 > Can I start on 3 November?
 Yes, 3 November is fine.
 
@@ -69,10 +69,10 @@ def test_outlook_original_message_tail_is_dropped():
     text = """From: Dana <d@example.org>
 Subject: Re: Hours
 
-Hi Sam, the hours are 9 to 5, Monday to Thursday. Please confirm.
+Hi Alex, the hours are 9 to 5, Monday to Thursday. Please confirm.
 
 -----Original Message-----
-From: Sam
+From: Alex
 Sent: Monday, 13 October 2025 9:00 AM
 To: Dana
 Subject: Hours
@@ -84,9 +84,9 @@ What are the hours?
 
 
 def test_outlook_header_block_without_marker_line_is_history_too():
-    text = """Hi Sam, see below and reply by Friday 24 October.
+    text = """Hi Alex, see below and reply by Friday 24 October.
 
-From: Sam
+From: Alex
 Sent: Monday, 13 October 2025 9:00 AM
 To: Dana
 Subject: Hours
@@ -102,7 +102,7 @@ def test_signature_delimiter_and_mobile_footers():
 Please send drafts early.
 
 -- 
-Sam Roberts
+Alex Morgan
 Student, Unit Co-ordinator
 Phone: 0400 000 000
 
@@ -142,7 +142,7 @@ My friend Dana wrote: "trains are late". Here is what I think about that, in mor
 
 -- 
 That was the essay. Thanks, and regards,
-Sam
+Alex
 """
     assert not looks_like_email(article)
     assert strip_email_noise(article) == article
@@ -156,7 +156,7 @@ def test_looks_like_email_markers():
 
 
 def test_wrapped_attribution_line():
-    text = "From: a@b.c\nSubject: Re: x\n\nNew reply text that matters a lot for the reader here.\n\nOn Tue, 14 Oct 2025 at 09:15, Sam Roberts\n<sam@example.com> wrote:\n> old stuff\n> more old stuff\n"
+    text = "From: a@b.c\nSubject: Re: x\n\nNew reply text that matters a lot for the reader here.\n\nOn Tue, 14 Oct 2025 at 09:15, Alex Morgan\n<alex@example.com> wrote:\n> old stuff\n> more old stuff\n"
     out = strip_email_noise(text)
     assert "New reply" in out and "old stuff" not in out and "wrote" not in out
 
