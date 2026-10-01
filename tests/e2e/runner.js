@@ -300,8 +300,9 @@ const checks = {
       await page.setViewportSize({ width: w, height: 900 });
       await openReader(page);
       await deepZoom(page);
+      await page.evaluate(() => document.fonts.ready);
       await page.waitForTimeout(300);
-      const info = await page.evaluate(() => ({ cols: document.querySelector("#content").dataset.cols, est: +document.querySelector("#content").dataset.cpl, grid: getComputedStyle(document.querySelector(".section-grid")).gridTemplateColumns.split(" ").length }));
+      const info = await page.evaluate(() => ({ workSans: document.fonts.check('17px "Work Sans"') && [...document.fonts].some((f) => f.family.includes("Work Sans") && f.status === "loaded"), cols: document.querySelector("#content").dataset.cols, est: +document.querySelector("#content").dataset.cpl, grid: getComputedStyle(document.querySelector(".section-grid")).gridTemplateColumns.split(" ").length }));
       const m = await firstLineChars(page);
       out[w] = { ...info, measured: m && m.chars, colWidth: m && m.width };
       // never two columns under ~45 characters, and never one column where two would have fit
