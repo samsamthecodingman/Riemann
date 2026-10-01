@@ -195,6 +195,77 @@ def test_clean_overview_applies_the_sort():
     assert [e.label for e in _ov({}, essentials=ess).essentials] == ["Due", "Deliverables", "Weight"]
 
 
+# --- actions --------------------------------------------------------------------------------
+
+MEETING = (
+    "Tom Becker to finish the data reload by Friday 24 October.\n\n"
+    "Aisha Rahman to chase Dr Malik about the ethics check by Wednesday 15 October. Luis Ortega to phone the ethics office on Thursday 16 October.\n\n"
+    "Priya Nair to send the correction note to dashboard users on the day the dashboard is republished."
+)
+
+
+def _meeting_ov(actions):
+    tree = _tree(MEETING, genre="meeting")
+    return _ov({"actions": actions}, tree=tree).actions
+
+
+def A(who, what, due=None, due_iso=None, cites=("l0",)):
+    return {"who": who, "what": what, "due": due, "due_iso": due_iso, "cites": list(cites)}
+
+
+def test_actions_sort_earliest_first_and_undated_last():
+    acts = _meeting_ov(
+        [
+            A("Priya Nair", "send the correction note to dashboard users", cites=["l2"]),
+            A("Tom Becker", "finish the data reload", "Friday 24 October", "2025-10-24", ["l0"]),
+            A("Luis Ortega", "phone the ethics office", "Thursday 16 October", "2025-10-16", ["l1"]),
+            A("Aisha Rahman", "chase Dr Malik about the ethics check", "Wednesday 15 October", "2025-10-15", ["l1"]),
+        ]
+    )
+    assert [a.who for a in acts] == ["Aisha Rahman", "Luis Ortega", "Tom Becker", "Priya Nair"]
+    assert acts[0].due == "Wednesday 15 October" and acts[0].due_iso == "2025-10-15" and acts[-1].due is None and acts[-1].due_iso is None
+    assert acts[0].cites == ["l1"]
+
+
+def test_actions_only_for_meetings():
+    tree = _tree(MEETING, genre="assignment")
+    assert _ov({"actions": [A("Tom Becker", "finish the data reload")]}, tree=tree).actions == []
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        A("Tom Becker", "finish the data reload", cites=[]),  # no cites
+        A("Zed Quill", "finish the data reload"),  # who is not in the cited leaf
+        A("Tom Becker", "paint the shed with kangaroos"),  # what shares nothing
+        A("Tom Becker", "finish the data reload", "Monday 24 October", "2025-10-24"),  # weekday not in the leaf
+        A("Tom Becker", "finish the data reload", "Friday 25 October", "2025-10-25"),  # day not in the leaf
+        A("Tom Becker", "finish the data reload", "Friday 24 November", "2025-11-24"),  # month not in the leaf
+        {"who": "Tom Becker", "cites": ["l0"]},
+        "Tom to finish",
+    ],
+)
+def test_actions_the_source_does_not_support_are_dropped(bad):
+    good = A("Tom Becker", "finish the data reload", "Friday 24 October", "2025-10-24")
+    assert [a.who for a in _meeting_ov([bad, good])] == ["Tom Becker"]
+    assert len(_meeting_ov([bad, good])) == 1
+
+
+def test_an_unsupported_due_iso_is_dropped_but_the_action_stays():
+    acts = _meeting_ov([A("Tom Becker", "finish the data reload", "Friday 24 October", "2025-10-30")])
+    assert len(acts) == 1 and acts[0].due == "Friday 24 October" and acts[0].due_iso is None
+
+
+def test_a_year_less_action_date_gets_an_inferred_year():
+    acts = _meeting_ov([A("Tom Becker", "finish the data reload", "Friday 24 October", "10-24")])
+    assert acts[0].due_iso == "2025-10-24" and acts[0].year_inferred is True
+
+
+def test_at_most_12_actions_and_no_duplicates():
+    acts = _meeting_ov([A("Tom Becker", "finish the data reload")] * 3 + [A("Tom Becker", f"finish the data reload item {i}") for i in range(20)])
+    assert len(acts) <= 12 and len({(a.who, a.what) for a in acts}) == len(acts)
+
+
 # --- the fake summariser emits examples through a real build ---------------------------------
 
 async def _build(name, title, tid, objective=None):
@@ -211,12 +282,23 @@ async def test_fake_build_of_the_assignment_brief_has_the_do_it_fields():
     assert ov.start_here and len(ov.start_here.text.split()) <= 25 and ov.start_here.cites
     assert ov.size_of_job and ov.size_of_job.basis and len(ov.size_of_job.text.split()) <= 20
     assert ov.deadline and ov.deadline.iso == "2025-11-14" and ov.deadline.time == "17:00" and ov.deadline.year_inferred is False
+    assert ov.actions == []
+
+
+async def test_fake_build_of_the_meeting_notes_has_sorted_actions():
+    tree = await _build("meeting.md", "Project steering meeting", "do-meet")
+    acts = tree.overview.actions
+    assert tree.genre == "meeting" and len(acts) >= 4
+    dated = [a.due_iso for a in acts if a.due_iso]
+    assert dated == sorted(dated) and [a.due_iso is None for a in acts] == sorted(a.due_iso is None for a in acts)
+    assert all(a.who and a.what and a.cites for a in acts)
+    assert tree.overview.start_here is not None  # meeting notes are task-like too
 
 
 async def test_fake_build_of_a_paper_has_no_do_it_fields():
     tree = await _build("paper.md", "Walks and sleep", "do-paper")
     ov = tree.overview
-    assert tree.genre == "paper" and ov.start_here is None and ov.size_of_job is None and ov.deadline is None
+    assert tree.genre == "paper" and ov.start_here is None and ov.size_of_job is None and ov.deadline is None and ov.actions == []
 
 
 async def test_the_execute_goal_makes_any_document_task_like():

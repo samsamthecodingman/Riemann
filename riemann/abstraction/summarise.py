@@ -330,6 +330,11 @@ _MONTH_ALT = "|".join(_MONTHS)
 _DMY_RE = re.compile(rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+(?:of\s+)?({_MONTH_ALT})(?:\s+(\d{{4}}))?")
 _MDY_RE = re.compile(rf"\b({_MONTH_ALT})\s+(\d{{1,2}})(?:st|nd|rd|th)?(?:,?\s+(\d{{4}}))?")
 _TIME_RE = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", re.IGNORECASE)
+_ACTION_RE = re.compile(
+    r"^(?P<who>[A-Z][a-z]+(?: [A-Z][a-z]+)?) to (?P<what>.+?)(?: (?:by|on) (?P<due>(?:[A-Z][a-z]+day )?\d{1,2} [A-Z][a-z]+(?: \d{4})?))?\.?$"
+)
+
+
 def _fake_date(text: str) -> tuple[str, str] | None:
     """(phrase, iso) for the first date written in text: "14 November 2025", "November 14"; the iso is
     "YYYY-MM-DD", or "MM-DD" when the text gives no year."""
@@ -372,9 +377,10 @@ class FakeSummariser:
         """Deterministic overview: title from the "Document title" line, values
         are the first alphabetic words of the first shown leaf (so the number
         validator never trips), cited to that leaf. When the prompt asks for the
-        do-it fields, example values are built from the source itself: the first
-        date written in a leaf becomes the deadline (year-less when the source
-        gives no year) and the first "N words" the size basis."""
+        do-it fields or meeting actions, example values are built from the
+        source itself: the first date written in a leaf becomes the deadline
+        (year-less when the source gives no year), the first "N words" the size
+        basis, and every "<Name> to <task> [by <date>]" sentence an action."""
         title_match = re.search(r"^Document title \(as extracted\): (.*)$", prompt, re.MULTILINE)
         doc_title = (title_match.group(1).strip() if title_match else "") or "Untitled"
         leaf_match = _LEAF_IDS_RE.search(prompt)
@@ -404,6 +410,8 @@ class FakeSummariser:
             out["genre"] = detect_genre(doc_title, "\n".join(t for _, t in blocks))[0] or "other"
         if "Do-it fields." in system and first_leaf:
             out.update(self._do_it(blocks, words, first_leaf[0]))
+        if "Meeting fields." in system:
+            out["actions"] = self._actions(blocks)
         return json.dumps(out)
 
     @staticmethod
@@ -430,6 +438,27 @@ class FakeSummariser:
                 deadline = {"iso": found[1], "time": hhmm, "label": "Due date", "cites": [lid]}
                 break
         return {"start_here": start_here, "size_of_job": size, "deadline": deadline}
+
+    @staticmethod
+    def _actions(blocks: list[tuple[str, str]]) -> list[dict]:
+        out = []
+        for lid, text in blocks:
+            for sent in re.split(r"(?<=[.!?])\s+|\n+", text):
+                m = _ACTION_RE.match(sent.strip().lstrip("-*").strip())
+                if not m:
+                    continue
+                due = m.group("due")
+                found = _fake_date(due) if due else None
+                out.append(
+                    {
+                        "who": m.group("who"),
+                        "what": m.group("what").strip().rstrip("."),
+                        "due": due,
+                        "due_iso": found[1] if found else None,
+                        "cites": [lid],
+                    }
+                )
+        return out
 
     async def summarise(self, prompt: str, system: str) -> str:
         combined = system + "\n" + prompt

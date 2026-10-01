@@ -27,7 +27,7 @@ from riemann.abstraction.genre import (
     is_task_like,
     valid_genre,
 )
-from riemann.abstraction.model import CitedText, Deadline, Essential, KeyFact, Node, Overview, SizeOfJob, Tree
+from riemann.abstraction.model import Action, CitedText, Deadline, Essential, KeyFact, Node, Overview, SizeOfJob, Tree
 from riemann.abstraction.summarise import ModelError, Summariser, parse_json_robustly
 
 RATIO = 3  # compression per step; Forte's practitioner funnel suggests 2.5-4x (weak evidence)
@@ -662,6 +662,10 @@ DO_IT_FIELDS = """Do-it fields. This reader has something to do. Add these three
 "size_of_job": a rough estimate of the EFFORT the whole job will take, in sessions, hours or days, at most 20 words (for example "About 3 sessions of 2 hours"); never a description of the deliverable. Base it ONLY on sizes the source states (pages, words, datasets, weeks, number of tasks) and copy those stated quantities exactly into "basis" (for example "a 1,800-word report, a notebook and 3 sites"). null when the source states no size.
 "deadline": the single main deadline the source states. "iso" is its date as YYYY-MM-DD, "time" its clock time as HH:MM on a 24-hour clock (or null), "label" says what is due in at most 8 words. If the source gives no year, use the year the context implies, or the next occurrence. Never guess a day or a month: the day number and the month must appear in a cited leaf. null when no deadline is stated."""
 
+MEETING_FIELDS = """Meeting fields. Add this key to the JSON object:
+ "actions": [{"who": "...", "what": "...", "due": "..." or null, "due_iso": "YYYY-MM-DD" or null, "cites": ["leaf_id", ...]}]
+Each action is something a named person WILL DO after the meeting, never something that was only discussed. "who" is the owner as the source names them; "what" is the task in at most 20 words, in the source's words; "due" is the date copied as the source writes it ("Friday 24 October"), "due_iso" the same date as YYYY-MM-DD; both null when no date is given. List every action, earliest due first and undated ones last."""
+
 GENRE_REQUEST = """Also add "genre": one of assignment, paper, news, email, meeting, legal, technical, article, other (the kind of document this is)."""
 
 # What the reader's goal makes the most useful essentials (appended to the
@@ -675,10 +679,14 @@ OVERVIEW_ESSENTIALS: dict[str, str] = {
     "communicate": "For this reader, prefer essentials like: The ask, From, Reply by, What is needed from you.",
 }
 
+MAX_ACTIONS = 12
 START_HERE_MAX_WORDS = 25
 SIZE_OF_JOB_MAX_WORDS = 20
 SIZE_BASIS_MAX_WORDS = 30
 DEADLINE_LABEL_MAX_WORDS = 10
+ACTION_WHO_MAX_WORDS = 8
+ACTION_WHAT_MAX_WORDS = 25
+ACTION_DUE_MAX_WORDS = 10
 
 
 def _today() -> datetime.date:
@@ -701,6 +709,8 @@ def _overview_system(tree: Tree) -> str:
         system += "\n\n" + GENRE_REQUEST
     if genre is None or is_task_like(genre, tree.objective):
         system += "\n\n" + DO_IT_FIELDS
+    if genre is None or genre == "meeting":
+        system += "\n\n" + MEETING_FIELDS
     system = with_focus(system, tree.objective, genre)
     hint = _essentials_hint(genre, tree.objective)
     return f"{system}\n\n{hint}" if hint else system
@@ -893,6 +903,53 @@ def _clean_deadline(raw: object, nodes: dict[str, Node], leaf_ids: set[str], tod
     return Deadline(iso=resolved[0], time=time, label=label, cites=cites, year_inferred=resolved[1])
 
 
+def _name_tokens(text: str) -> set[str]:
+    return {m.group().lower() for m in re.finditer(r"[^\W\d_]{2,}", text) if m.group().lower() not in {"and", "the", "dr", "mr", "ms", "mrs"}}
+
+
+def _clean_actions(raw: object, nodes: dict[str, Node], leaf_ids: set[str], today: datetime.date, warn: Warn | None) -> list[Action]:
+    """Meeting actions. Each needs cites; `who` must be a name from the cited leaves, `what` must share
+    content words with them, a stated `due` must pass the number and date checks (else the action is
+    dropped), and `due_iso` is kept only if the source supports that date. Earliest due first, undated last."""
+    if not isinstance(raw, list):
+        return []
+    out: list[Action] = []
+    seen: set[tuple[str, str]] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        who, what = item.get("who"), item.get("what")
+        if not isinstance(who, str) or not who.strip() or not isinstance(what, str) or not what.strip():
+            continue
+        cites = _valid_cites(item, leaf_ids)
+        if not cites:
+            continue
+        who = _cap_chars(_truncate_words(who.strip(), ACTION_WHO_MAX_WORDS), 100)
+        what = _cap_chars(_truncate_words(what.strip(), ACTION_WHAT_MAX_WORDS), 300)
+        source = " ".join(nodes[c].text for c in cites)
+        if not (_name_tokens(who) & _name_tokens(source)):
+            continue
+        if not _supported(what, source) or not checks.overlap_ok(what, source, CITE_OVERLAP_FLOOR):
+            continue
+        due = item.get("due")
+        due = _cap_chars(_truncate_words(due.strip(), ACTION_DUE_MAX_WORDS), 100) if isinstance(due, str) and due.strip() else None
+        if due is not None and not _supported(due, source):
+            continue
+        due_iso, inferred = None, False
+        resolved = _resolve_date(item.get("due_iso"), source, today) if item.get("due_iso") else None
+        if resolved is not None:
+            due_iso, inferred = resolved
+        if (who.lower(), what.lower()) in seen:
+            continue
+        seen.add((who.lower(), what.lower()))
+        _warn_dropped_qualifier(warn, f"action {who}", what, source)
+        out.append(Action(who=who, what=what, due=due, due_iso=due_iso, cites=cites, year_inferred=inferred))
+        if len(out) >= MAX_ACTIONS:
+            break
+    order = {id(a): i for i, a in enumerate(out)}
+    return sorted(out, key=lambda a: (a.due_iso is None, a.due_iso or "", order[id(a)]))
+
+
 def _clean_overview(raw: object, tree: Tree, warn: Warn | None = None, today: datetime.date | None = None) -> Overview | None:
     if not isinstance(raw, dict):
         return None
@@ -921,10 +978,13 @@ def _clean_overview(raw: object, tree: Tree, warn: Warn | None = None, today: da
     essentials = _sort_essentials(_clean_essentials(raw.get("essentials"), tree.nodes, all_leaf_ids, warn))
     today = today or _today()
     start_here = size_of_job = deadline = None
+    actions: list[Action] = []
     if is_task_like(tree.genre, tree.objective):
         start_here = _clean_start_here(raw.get("start_here"), tree.nodes, all_leaf_ids, warn)
         size_of_job = _clean_size_of_job(raw.get("size_of_job"), tree.nodes, all_leaf_ids)
         deadline = _clean_deadline(raw.get("deadline"), tree.nodes, all_leaf_ids, today)
+    if tree.genre == "meeting":
+        actions = _clean_actions(raw.get("actions"), tree.nodes, all_leaf_ids, today, warn)
     return Overview(
         doc_title=doc_title,
         doc_kind=doc_kind,
@@ -933,6 +993,7 @@ def _clean_overview(raw: object, tree: Tree, warn: Warn | None = None, today: da
         start_here=start_here,
         size_of_job=size_of_job,
         deadline=deadline,
+        actions=actions,
     )
 
 

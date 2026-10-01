@@ -169,3 +169,19 @@ Deadline, Reply by, Submit by ...), then deliverable labels (Deliverables, What 
 then first-step labels (Start here, First step, Next action), then everything else in the model's order. The prompt
 asks for the same order. The UI should show `start_here`, `deadline` and `size_of_job` before the essentials.
 
+### Meeting actions (`Overview.actions`)
+
+For `genre == "meeting"` the overview has `actions`, a list (empty otherwise, never `null`), earliest due first and
+undated actions last. At most 12.
+
+    {"who": "Aisha Rahman", "what": "Chase Dr Malik about the ethics check",
+     "due": "Wednesday 15 October", "due_iso": "2025-10-15", "cites": ["n870d..."], "year_inferred": false}
+
+- `who` and `what` are checked against the cited leaves: some word of `who` (a name) must be in them, and `what` must
+  share content words with them (the same overlap floor as essentials). An action with no cite, or one that fails
+  either check, is dropped.
+- `due` is the date as the source writes it (`null` when none). Its weekday, month and day number must be in the
+  cited leaves, otherwise the whole action is dropped. `due_iso` is `YYYY-MM-DD` or `null`: it is kept only when its day
+  and month are in the cited leaves (a wrong one is dropped but the action stays). `year_inferred` is as for the deadline.
+- The browser sorts nothing: the order is already the display order. "Which are mine" is not built.
+

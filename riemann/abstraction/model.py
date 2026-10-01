@@ -61,6 +61,18 @@ class Deadline(BaseModel):
     year_inferred: bool = False
 
 
+class Action(BaseModel):
+    """One meeting action: who does what by when. `due` is the source's own wording of the date
+    ("Friday 14 November"), `due_iso` the same date as YYYY-MM-DD when it could be worked out."""
+
+    who: str
+    what: str
+    due: str | None = None
+    due_iso: str | None = None
+    cites: list[str] = Field(default_factory=list)
+    year_inferred: bool = False
+
+
 class Overview(BaseModel):
     """The "what is this" card shown above section 01 at every zoom level:
     what kind of document it is, its real title, one plain sentence, and the
@@ -78,6 +90,8 @@ class Overview(BaseModel):
     """A rough estimate of the work (at most 20 words), with what it is based on. Task-like documents only."""
     deadline: Deadline | None = None
     """The single main deadline, if the source states one. Task-like documents only."""
+    actions: list[Action] = Field(default_factory=list)
+    """Meeting notes only: who does what by when, earliest due first, undated last."""
 
 
 class Node(BaseModel):
