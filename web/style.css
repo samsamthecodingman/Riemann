@@ -791,7 +791,8 @@ kbd {
 }
 
 #palette-btn,
-#map-btn {
+#map-btn,
+#search-btn {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -808,8 +809,15 @@ kbd {
   flex-shrink: 0;
 }
 
+#search-btn {
+  width: 44px;
+  padding: 0;
+  justify-content: center;
+}
+
 #palette-btn[aria-pressed="true"],
-#map-btn[aria-pressed="true"] {
+#map-btn[aria-pressed="true"],
+#search-btn[aria-pressed="true"] {
   border: 2px solid var(--ink-btn);
 }
 
@@ -2898,4 +2906,86 @@ body.col-dragging * {
 .rail-label {
   overflow-wrap: normal;
   white-space: nowrap;
+}
+
+
+/* ---------- In-document search ---------- */
+
+#search-bar {
+  position: fixed;
+  top: calc(var(--header-h) + 8px);
+  right: 24px;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100vw - 32px);
+  padding: 6px 8px 6px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  box-shadow: var(--shadow-sm);
+}
+
+#search-bar[hidden] {
+  display: none;
+}
+
+#search-input {
+  width: 240px;
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 36px;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: var(--ui);
+  font-size: 15px;
+  color: var(--text);
+}
+
+#search-bar:focus-within {
+  border-color: var(--ink-btn);
+}
+
+.search-count {
+  min-width: 5.5em;
+  text-align: right;
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.search-nav {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: var(--pill);
+  border: 1px solid var(--border);
+  background: var(--chip);
+  color: var(--text);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+@media (pointer: coarse) {
+  #search-input,
+  .search-nav {
+    height: 44px;
+  }
+  .search-nav {
+    width: 44px;
+  }
+}
+
+.search-hit {
+  background: color-mix(in srgb, var(--sec-3) 75%, transparent);
+  color: var(--text);
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--sec-3) 60%, var(--text) 30%);
+}
+
+.search-hit.search-current {
+  background: var(--sec-3);
+  box-shadow: 0 0 0 2px var(--ink-btn);
 }

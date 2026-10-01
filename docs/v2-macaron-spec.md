@@ -143,3 +143,22 @@ A CSS grid: `300px | minmax(0,1fr) | 380px` columns and a `72px | 1fr` row. The 
 - Resume.
 - The event log.
 - The JS/Python frontier parity test.
+
+
+## In-document search
+
+`/` or Ctrl+F (only while a document is open), or the magnifier button in the header, opens a search box
+(`#search-bar`: a labelled input, an `aria-live="polite"` count such as "3 of 12" or "No matches", previous and next
+buttons, close). It searches the **whole document**, not just what is expanded: every node's title, key points and text
+(so every source leaf), and the overview card. Enter or the down arrow goes to the next match, Shift+Enter or the up
+arrow to the previous one (wrapping). Esc closes the box and clears the marks; Ctrl+F pressed again inside the box is
+left to the browser's own find. A query needs 2 or more characters; matching ignores case.
+
+A match that is not on the page opens the shallowest form that contains it: the node is revealed with the same
+`kToReveal` path as a jump (a match in a summary's text also asks for its prose form); if that node has already been
+opened into its parts, the page is re-composed around it (a fresh expansion order anchored there), so it shows whole.
+Marked text is wrapped in `span.search-hit` (the current match also `.search-current` with an outline, so it does not
+rely on colour); marks are re-applied after every re-render while the box is open, and never change the text offsets
+that highlights use. Counting and marking use one text-extraction routine (blocks separated by newlines), so they agree.
+
+The log gets one `search` event per settled query with only `query_length` and `matches` (a number), never the text.

@@ -73,6 +73,18 @@ async function deepZoom(page) {
   await page.waitForTimeout(400);
 }
 
+// A document long enough to open collapsed, with a distinctive word in every leaf.
+function longDoc() {
+  let out = "# Harbour survey\n\n";
+  for (let s = 1; s <= 6; s++) {
+    out += `## Section ${s}\n\n`;
+    for (let p = 1; p <= 6; p++) {
+      out += `Paragraph ${p} of section ${s} mentions marker${s}x${p} and then ` + "the tide moved sand along the northern beach while the survey team measured it. ".repeat(7) + "\n\n";
+    }
+  }
+  return out;
+}
+
 const checks = {
   async zoom_grows_words(page) {
     await openReader(page);
@@ -356,6 +368,84 @@ const checks = {
       /Due in 2 days/.test(r.due[0]) && /Due in 3 days/.test(r.due[1]) && r.due[4] === null &&
       r.links.every((n) => n === 1) && r.overflow <= 0 && !r.rowOverflow;
     return { ok, ...r };
+  },
+
+  async search_whole_document_and_navigate(page) {
+    const id = await buildText(longDoc());
+    const posted = [];
+    page.on("request", (r) => { if (r.url().endsWith("/api/events") && r.method() === "POST") posted.push(r.postData() || ""); });
+    await openReader(page, id);
+    const before = await page.evaluate(() => document.querySelectorAll("#content .node.leaf").length);
+    await page.keyboard.press("/");
+    const open = await page.evaluate(() => ({ shown: !document.querySelector("#search-bar").hidden, focused: document.activeElement && document.activeElement.id, label: document.querySelector('label[for="search-input"]').textContent }));
+    await page.keyboard.type("marker4x5");
+    await page.waitForTimeout(1500);
+    const hit = await page.evaluate(() => {
+      const c = document.querySelector(".search-current");
+      const r = c && c.getBoundingClientRect();
+      return {
+        count: document.querySelector("#search-count").textContent,
+        live: document.querySelector("#search-count").getAttribute("aria-live"),
+        text: c && c.textContent,
+        inLeaf: !!(c && c.closest(".node.leaf")),
+        inView: !!r && r.top >= 0 && r.bottom <= innerHeight,
+        marks: document.querySelectorAll(".search-hit").length,
+      };
+    });
+    // a word that only occurs deep in the source opens just enough: some leaf is now on the page
+    const after = await page.evaluate(() => document.querySelectorAll("#content .node.leaf").length);
+    // next / previous wrap around the single match; a second query finds many
+    await page.fill("#search-input", "survey team");
+    await page.waitForTimeout(500);
+    const many = await page.evaluate(() => document.querySelector("#search-count").textContent);
+    const total = +(/of (\d+)/.exec(many) || [])[1];
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(300);
+    const second = await page.evaluate(() => document.querySelector("#search-count").textContent);
+    await page.keyboard.press("Shift+Enter");
+    await page.keyboard.press("Shift+Enter");
+    await page.waitForTimeout(300);
+    const wrapped = await page.evaluate(() => document.querySelector("#search-count").textContent);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(200);
+    const closed = await page.evaluate(() => ({ hidden: document.querySelector("#search-bar").hidden, marks: document.querySelectorAll(".search-hit").length, value: document.querySelector("#search-input").value }));
+    // Ctrl+F: opens ours; pressed again inside the box it is left to the browser
+    await page.keyboard.press("Control+f");
+    const ours = await page.evaluate(() => !document.querySelector("#search-bar").hidden);
+    await page.evaluate(() => { window.__dp = []; document.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "f") window.__dp.push(e.defaultPrevented); }); });
+    await page.keyboard.press("Control+f");
+    const dp = await page.evaluate(() => window.__dp);
+    await page.keyboard.press("Escape");
+    await page.evaluate(() => fetch("/api/events", { method: "POST", headers: { "content-type": "application/json" }, body: "[]" }));
+    await page.waitForTimeout(5600);
+    const body = posted.join("\n");
+    const searchEv = (body.match(/"type":"search"[^}]*/g) || []);
+    const ok =
+      open.shown && open.focused === "search-input" && /search/i.test(open.label) &&
+      hit.count === "1 of 1" && hit.live === "polite" && /marker4x5/.test(hit.text) && hit.inLeaf && hit.inView &&
+      after > before && total > 3 && second === `2 of ${total}` && wrapped === `${total} of ${total}` &&
+      closed.hidden && closed.marks === 0 && closed.value === "" &&
+      ours && dp.length === 1 && dp[0] === false &&
+      searchEv.length >= 2 && searchEv.every((e) => /"query_length":\d+/.test(e)) && !/marker4x5|survey team/.test(body);
+    return { ok, open, hit, before, after, many, second, wrapped, closed, ours, dp, searchEv };
+  },
+
+  async search_at_every_depth_never_errors_and_finds_summaries(page) {
+    const id = await buildText(longDoc());
+    await openReader(page, id);
+    await deepZoom(page);
+    await page.keyboard.press("/");
+    await page.keyboard.type("moved sand");
+    await page.waitForTimeout(500);
+    const n = await page.evaluate(() => document.querySelector("#search-count").textContent);
+    const seen = new Set();
+    for (let i = 0; i < 12; i++) {
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(150);
+      seen.add(await page.evaluate(() => document.querySelector("#search-count").textContent));
+    }
+    const state = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, cur: !!document.querySelector(".search-current") }));
+    return { ok: /of \d+/.test(n) && seen.size === 12 && state.overflow <= 0, n, seen: seen.size, state };
   },
 
   async failed_build_shows_message_and_retries(page) {

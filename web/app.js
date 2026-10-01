@@ -1104,6 +1104,7 @@
       applyColumnMode(false);
       $content.innerHTML = contentHTML();
       applyHighlightsToDOM();
+      if (search.open && search.query) applySearchMarks();
       updateHeader();
       updateNavCurrent();
       updateRail();
@@ -2036,6 +2037,345 @@
   }
 
   // ---------------------------------------------------------------------
+  // In-document search: "/" or Ctrl+F while a document is open.
+  // It looks through the whole document (every node's title, key points and text,
+  // the source leaves, and the overview card), not only what is expanded. A match
+  // that is not on the page yet opens just enough (the shallowest form that
+  // contains it, via the same kToReveal path as a jump); matches on the page are
+  // marked, the current one more strongly. Only the query's length is logged.
+  // ---------------------------------------------------------------------
+  const search = { open: false, query: "", hits: [], cur: -1, index: null, timer: null, opener: null };
+  const $searchBar = el("search-bar");
+  const $searchInput = el("search-input");
+  const $searchCount = el("search-count");
+  const $searchBtn = el("search-btn");
+  const SEARCH_MIN = 2;
+  const SEARCH_MARK_CAP = 400;
+  const BLOCK_SEL = "p,li,h1,h2,h3,h4,h5,h6,tr,blockquote,pre,dt,dd,div,section,ul,ol,table";
+
+  function lowerSafe(s) {
+    const l = s.toLowerCase();
+    if (l.length === s.length) return l;
+    return Array.from(s, (c) => {
+      const x = c.toLowerCase();
+      return x.length === c.length ? x : c;
+    }).join("");
+  }
+
+  // The text of an element as one string, with a newline between blocks, plus
+  // where each text node starts in it. Used both to count matches (on parsed
+  // markup) and to mark them (on the live page), so the two always agree.
+  function textSegments(root) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const segs = [];
+    let virt = "";
+    let lastBlock = null;
+    let n;
+    while ((n = walker.nextNode())) {
+      const b = n.parentElement && n.parentElement.closest(BLOCK_SEL);
+      if (segs.length && b !== lastBlock) virt += "\n";
+      lastBlock = b;
+      segs.push({ node: n, start: virt.length });
+      virt += n.nodeValue;
+    }
+    return { virt, segs };
+  }
+
+  function findAll(lower, q) {
+    const out = [];
+    if (!q) return out;
+    let i = 0;
+    while ((i = lower.indexOf(q, i)) !== -1) {
+      out.push(i);
+      i += q.length;
+    }
+    return out;
+  }
+
+  function inertBody(html) {
+    return new DOMParser().parseFromString(`<body>${html}</body>`, "text/html").body;
+  }
+
+  // One entry per searchable field, in reading order: the overview card first, then each node
+  // (title, key points, text) top-down. The root's own summary is the gist and the card.
+  function buildSearchIndex() {
+    const tree = state.tree;
+    const entries = [];
+    const add = (nodeId, field, html) => {
+      const { virt } = textSegments(inertBody(html));
+      entries.push({ nodeId, field, lower: lowerSafe(virt) });
+    };
+    const ovHTML = overviewHTML();
+    if (ovHTML) add(null, "overview", ovHTML);
+    (function walk(id) {
+      const n = tree.nodes[id];
+      if (!n) return;
+      const isRoot = id === tree.root;
+      if (!(isRoot && !n.is_leaf)) {
+        if (n.title) add(id, "title", escapeHtml(n.title));
+        const points = n.key_points && n.key_points.length ? n.key_points : n.hook ? [n.hook] : [];
+        if (!n.is_leaf && points.length) add(id, "point", `<ul>${points.map((p) => `<li>${renderInline(p)}</li>`).join("")}</ul>`);
+        if (n.text) add(id, "text", renderMarkdown(n.text));
+      }
+      for (const c of n.children || []) walk(c);
+    })(tree.root);
+    return { treeId: tree.id, overview: tree.overview || null, entries };
+  }
+
+  function searchIndex() {
+    const ix = search.index;
+    if (!ix || ix.treeId !== state.tree.id || ix.overview !== (state.tree.overview || null)) search.index = buildSearchIndex();
+    return search.index;
+  }
+
+  function wrapVirtRange(segs, from, to) {
+    let a = null;
+    let b = null;
+    for (const sg of segs) {
+      const len = sg.node.nodeValue.length;
+      if (!a && from >= sg.start && from < sg.start + len) a = sg;
+      if (to > sg.start && to <= sg.start + len) b = sg;
+    }
+    if (!a || !b) return;
+    const range = document.createRange();
+    range.setStart(a.node, from - a.start);
+    range.setEnd(b.node, to - b.start);
+    const span = document.createElement("span");
+    span.className = "search-hit";
+    try {
+      range.surroundContents(span);
+    } catch (e) {
+      span.appendChild(range.extractContents());
+      range.insertNode(span);
+    }
+  }
+
+  function clearSearchMarks() {
+    for (const s of $content.querySelectorAll(".search-hit")) {
+      const p = s.parentNode;
+      if (!p) continue;
+      while (s.firstChild) p.insertBefore(s.firstChild, s);
+      p.removeChild(s);
+      p.normalize();
+    }
+  }
+
+  // The element that holds a given field of a node on the page.
+  function searchContainer(h) {
+    if (h.field === "overview") return $content.querySelector(".overview-card");
+    const N = h.nodeId;
+    const block = $content.querySelector(`[data-node-id="${N}"]`);
+    if (h.field === "title") {
+      return (block && block.querySelector(".node-title")) || $content.querySelector(`.section-block[data-section-id="${N}"] .section-header h1`);
+    }
+    if (h.field === "point") return block && block.querySelector(".skim-points");
+    if (block) return block.querySelector(".node-body");
+    return state.tree.nodes[N] && N === state.tree.root ? $content.querySelector(".root-hero .node-body") : null;
+  }
+
+  function applySearchMarks() {
+    clearSearchMarks();
+    const q = lowerSafe(search.query);
+    if (!search.open || q.length < SEARCH_MIN) return;
+    let budget = SEARCH_MARK_CAP;
+    const roots = $content.querySelectorAll(".overview-card, .section-header h1, .node-title, .skim-points, .node-body");
+    for (const root of roots) {
+      if (budget <= 0) break;
+      const { virt, segs } = textSegments(root);
+      const pos = findAll(lowerSafe(virt), q).slice(0, budget);
+      budget -= pos.length;
+      for (let i = pos.length - 1; i >= 0; i--) wrapVirtRange(segs, pos[i], pos[i] + q.length);
+    }
+    markCurrentHit();
+  }
+
+  function currentHitSpan() {
+    const h = search.hits[search.cur];
+    if (!h) return null;
+    const c = searchContainer(h);
+    return c ? c.querySelectorAll(".search-hit")[h.occ] || null : null;
+  }
+
+  function markCurrentHit() {
+    $content.querySelectorAll(".search-current").forEach((s) => {
+      s.classList.remove("search-current");
+      s.removeAttribute("aria-current");
+    });
+    const span = currentHitSpan();
+    if (span) {
+      span.classList.add("search-current");
+      span.setAttribute("aria-current", "true");
+    }
+    return span;
+  }
+
+  function updateSearchCount() {
+    const n = search.hits.length;
+    let text = "";
+    if (search.query.trim().length >= SEARCH_MIN) text = n ? `${search.cur + 1} of ${n}` : "No matches";
+    else if (search.query.trim()) text = "Type 2 or more letters";
+    $searchCount.textContent = text;
+  }
+
+  function runSearch() {
+    const q = lowerSafe(search.query.trim().replace(/\s+/g, " "));
+    search.hits = [];
+    search.cur = -1;
+    if (q.length >= SEARCH_MIN && state.tree) {
+      for (const e of searchIndex().entries) {
+        findAll(e.lower, q).forEach((_, occ) => search.hits.push({ nodeId: e.nodeId, field: e.field, occ }));
+      }
+      logEvent("search", { tree_id: state.tree.id, query_length: q.length, matches: search.hits.length });
+    }
+    search.query = search.query.trim().replace(/\s+/g, " ");
+    updateSearchCount();
+    if (search.hits.length) goToHit(0);
+    else applySearchMarks();
+  }
+
+  // Open just enough for the hit's field to be on the page, never more.
+  function revealHit(h) {
+    const tree = state.tree;
+    const F = window.Frontier;
+    if (h.field === "overview") {
+      window.scrollTo({ top: 0, behavior: REDUCED_MOTION ? "auto" : "smooth" });
+      return;
+    }
+    const N = h.nodeId;
+    const node = tree.nodes[N];
+    const needProse = h.field === "text" && !node.is_leaf;
+    const sufficient = () => state.frontier.includes(N) && (!needProse || state.prose.has(N));
+    if (sufficient()) return;
+    setAnchor(N);
+    const total = () => Math.max(1, state.sequence.length);
+    const curK = () => F.zToK(state.z, total());
+    // Smallest k on a sequence where N is on the page (in prose form when its text is wanted).
+    const targetK = (seq) => {
+      const kr = F.kToReveal(tree, seq, N);
+      if (!needProse) return kr;
+      const idx = seq.indexOf(F.PROSE + N);
+      if (idx < 0) return kr;
+      const want = Math.max(kr, idx + 1);
+      return F.frontierAtK(tree, seq, want).includes(N) ? want : kr;
+    };
+    const kr = F.kToReveal(tree, state.sequence, N);
+    if (kr <= curK() && !state.frontier.includes(N)) {
+      // N has already been opened into its parts: re-compose the page around it so it shows whole.
+      const seq = F.buildExpansionSequence(tree, N);
+      const zFrom = state.z;
+      resetTopSpacer();
+      state.sequence = seq;
+      state.sequenceAnchor = N;
+      state.z = targetK(seq) / Math.max(1, seq.length);
+      const r = F.frontierAtZ(tree, seq, state.z);
+      state.frontier = r.frontier;
+      state.prose = r.prose;
+      render({});
+      updateReadout();
+      savePositionDebounced();
+      logEvent("dial", { tree_id: tree.id, z_from: zFrom, z_to: state.z, input: "jump", anchor_node_id: N });
+      return;
+    }
+    const k = targetK(state.sequence);
+    if (k > curK()) setZ(k / total(), "jump");
+  }
+
+  function goToHit(i) {
+    const n = search.hits.length;
+    if (!n || !state.tree) return;
+    search.cur = ((i % n) + n) % n;
+    const h = search.hits[search.cur];
+    revealHit(h);
+    applySearchMarks();
+    updateSearchCount();
+    state.lastDialChangeAt = Date.now() + 600; // the scroll below is not a re-anchor
+    const span = currentHitSpan();
+    if (span) span.scrollIntoView({ block: "center", behavior: REDUCED_MOTION ? "auto" : "smooth" });
+    else if (h.nodeId && state.tree.nodes[h.nodeId]) jumpToNode(h.nodeId);
+    recordHistory("search");
+  }
+
+  function recordHistory() {} // replaced by the zoom history below
+
+  function openSearch() {
+    if (!state.tree || !$app.classList.contains("active")) return;
+    if (!search.open) search.opener = document.activeElement;
+    search.open = true;
+    $searchBar.hidden = false;
+    $searchBtn.setAttribute("aria-pressed", "true");
+    const hb = el("app-header").getBoundingClientRect().bottom;
+    $searchBar.style.top = `${Math.max(8, hb + 8)}px`;
+    $searchInput.focus();
+    $searchInput.select();
+  }
+
+  function closeSearch() {
+    if (!search.open) return;
+    search.open = false;
+    clearTimeout(search.timer);
+    $searchBar.hidden = true;
+    $searchBtn.setAttribute("aria-pressed", "false");
+    clearSearchMarks();
+    search.hits = [];
+    search.cur = -1;
+    search.query = "";
+    $searchInput.value = "";
+    $searchCount.textContent = "";
+    const back = search.opener;
+    search.opener = null;
+    if (back && back.isConnected && back !== document.body && back.focus) back.focus({ preventScroll: true });
+    else $searchBtn.focus({ preventScroll: true });
+  }
+
+  $searchBtn.addEventListener("click", () => (search.open ? closeSearch() : openSearch()));
+  el("search-close").addEventListener("click", closeSearch);
+  el("search-next").addEventListener("click", () => goToHit(search.cur + 1));
+  el("search-prev").addEventListener("click", () => goToHit(search.cur - 1));
+  $searchInput.addEventListener("input", () => {
+    search.query = $searchInput.value;
+    clearTimeout(search.timer);
+    search.timer = setTimeout(() => {
+      search.timer = null;
+      runSearch();
+    }, 160);
+  });
+  $searchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSearch();
+    } else if (e.key === "Enter" || e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (search.timer) {
+        clearTimeout(search.timer);
+        search.timer = null;
+        search.query = $searchInput.value;
+        runSearch();
+        if (e.key === "Enter" && !e.shiftKey) return; // the new search already went to the first match
+      }
+      goToHit(search.cur + (e.key === "ArrowUp" || (e.key === "Enter" && e.shiftKey) ? -1 : 1));
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (!$app.classList.contains("active")) return;
+    const t = e.target;
+    const tag = ((t && t.tagName) || "").toLowerCase();
+    const typing = tag === "input" || tag === "textarea" || tag === "select" || (t && t.isContentEditable);
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "f" || e.key === "F")) {
+      // Ctrl+F again inside the search box is the browser's own find.
+      if (search.open && document.activeElement === $searchInput) return;
+      e.preventDefault();
+      openSearch();
+    } else if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey && !typing) {
+      e.preventDefault();
+      openSearch();
+    }
+  });
+  window.addEventListener("resize", () => {
+    if (search.open) $searchBar.style.top = `${Math.max(8, el("app-header").getBoundingClientRect().bottom + 8)}px`;
+  });
+
+  // ---------------------------------------------------------------------
   // Not helpful link
   // ---------------------------------------------------------------------
   el("not-helpful").addEventListener("click", () => {
@@ -2117,6 +2457,7 @@
   }
 
   function openTree(tree, opts) {
+    closeSearch();
     resetTopSpacer();
     opts = opts || {};
     state.tree = tree;
@@ -2235,6 +2576,7 @@
       logEvent("close", { tree_id: state.tree.id });
       flushEvents(false);
     }
+    closeSearch();
     state.tree = null;
     state.dwellNode = null;
     state.dwellStart = 0;
