@@ -1034,8 +1034,22 @@ kbd {
   max-width: 780px;
 }
 
+/* Reading settings (palette panel): --reading-ls adds letter-spacing to the text you read,
+   --read-em (34, 40 or 48) caps one reading column at that many em of the 17 px body size. */
+.node-body,
+.skim-points li,
+.node h2.node-title,
+.section-hook,
+.ov-what,
+.ov-item dd,
+#probe-body,
+#probe-tile {
+  letter-spacing: var(--reading-ls, 0);
+}
+
 .section-grid {
   display: grid;
+  max-width: calc(2 * var(--read-em, 40) * 17px + 36px);
   grid-template-columns: repeat(2, minmax(0, 1fr));
   column-gap: 36px;
   row-gap: 28px;
@@ -1047,6 +1061,7 @@ kbd {
    #content (the reading grid) and .ov-one-col (the overview tiles). */
 #content.one-col .section-grid {
   grid-template-columns: minmax(0, 1fr);
+  max-width: calc(var(--read-em, 40) * 17px);
 }
 
 #col-probes {
@@ -1915,6 +1930,32 @@ button.source-link:focus-visible .source-link-more {
   border-radius: var(--pill);
   background: var(--hl);
   box-shadow: inset 0 0 0 1px rgba(42, 37, 33, 0.14);
+}
+
+#reading-section {
+  gap: 10px;
+}
+
+#reading-section .mode-btn {
+  justify-content: center;
+}
+
+.read-width-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.read-width-label {
+  flex: 1 0 100%;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.read-width-row .mode-btn[aria-checked="true"] {
+  border: 2px solid var(--ink-btn);
+  background: var(--chip);
 }
 
 .palette-note {

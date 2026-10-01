@@ -223,6 +223,7 @@ const checks = {
       localStorage.setItem("riemann:pos:" + id, JSON.stringify({ anchor_node_id: "<img>", z: "NaN", anchor_offset: {} }));
       localStorage.setItem("riemann:cols", '{"open":"x","closed":{"left":"<b>","rail":1e999}}');
       localStorage.setItem("riemann:checkin", '{"ts":"x","capacity":{"a":1}}');
+      localStorage.setItem("riemann:reading", '{"spacing":"<b>yes","width":"constructor"}');
     }, TREE);
     await openReader(page);
     await page.reload();
@@ -235,8 +236,11 @@ const checks = {
       imgs: document.querySelectorAll("img").length,
       nodes: document.querySelectorAll("#content [data-node-id]").length,
       hero: !!document.querySelector(".root-hero"),
+      readEm: getComputedStyle(document.documentElement).getPropertyValue("--read-em").trim(),
+      readLs: getComputedStyle(document.documentElement).getPropertyValue("--reading-ls").trim(),
+      spacingOn: document.querySelector("#ls-toggle").getAttribute("aria-pressed"),
     }));
-    return { ok: r.pwn === 0 && r.imgs === 0 && (r.nodes > 0 || r.hero), ...r };
+    return { ok: r.pwn === 0 && r.imgs === 0 && (r.nodes > 0 || r.hero) && r.readEm === "40" && r.readLs === "0" && r.spacingOn === "false", ...r };
   },
 
   async xss_payload_in_tree_text_is_escaped(page) {
@@ -501,6 +505,66 @@ const checks = {
       backShown && s2.y > s1.y + 500 && b1.page === s1.page && b2.page === s0.page &&
       Math.abs(b2.y - s0.y) < 40 && f1.page === s1.page && Math.abs(f2.y - s2.y) < 80 && b1.hash === s0.hash && home && shown && gone;
     return { ok, backShown, same: { b1: b1.page === s1.page, b2: b2.page === s0.page, f1: f1.page === s1.page }, y: [s0.y, s1.y, s2.y, b1.y, b2.y, f1.y, f2.y], home, shown, gone };
+  },
+
+  async reading_settings_persist_and_change_the_columns(page) {
+    const id = await buildText(longDoc());
+    await page.setViewportSize({ width: 1366, height: 900 });
+    await openReader(page, id);
+    await deepZoom(page);
+    const read = () =>
+      page.evaluate(() => {
+        const b = document.querySelector("#content .node-body");
+        return {
+          ls: parseFloat(getComputedStyle(b).letterSpacing) || 0,
+          maxw: getComputedStyle(document.querySelector(".section-grid")).maxWidth,
+          cols: document.querySelector("#content").dataset.cols,
+          stored: localStorage.getItem("riemann:reading"),
+          overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        };
+      });
+    const base = await read();
+    await page.click("#palette-btn");
+    await page.click("#ls-toggle");
+    await page.click('[data-width="narrow"]');
+    const narrow = await read();
+    await page.click('[data-width="wide"]');
+    const wide = await read();
+    await page.click('[data-width="normal"]');
+    await page.keyboard.press("Escape");
+    // reload: both persist
+    await page.reload();
+    await page.waitForSelector("#content .node, .root-hero");
+    await page.waitForTimeout(600);
+    const after = await page.evaluate(() => ({
+      spacing: document.querySelector("#ls-toggle").getAttribute("aria-pressed"),
+      width: document.querySelector('#read-width [aria-checked="true"]').dataset.width,
+      ls: getComputedStyle(document.documentElement).getPropertyValue("--reading-ls").trim(),
+    }));
+    // letter-spacing makes each column hold fewer characters, so the one-column switch comes sooner
+    const colsAt = async (w, on) => {
+      await page.setViewportSize({ width: w, height: 900 });
+      await page.evaluate((v) => {
+        localStorage.setItem("riemann:reading", JSON.stringify({ spacing: v, width: "normal" }));
+      }, on);
+      await page.reload();
+      await page.waitForSelector("#content .node, .root-hero");
+      await page.waitForTimeout(500);
+      return page.evaluate(() => document.querySelector("#content").dataset.cols);
+    };
+    const flips = [];
+    let wrongWay = false;
+    for (const w of [1740, 1760, 1780, 1800, 1820]) {
+      const off = await colsAt(w, false);
+      const on = await colsAt(w, true);
+      flips.push(`${w}:${off}/${on}`);
+      if (off === "1" && on === "2") wrongWay = true;
+    }
+    const ok =
+      base.ls === 0 && Math.abs(narrow.ls - 0.68) < 0.05 && narrow.maxw === "578px" && wide.maxw === "816px" &&
+      /"spacing":true/.test(wide.stored) && after.spacing === "true" && after.width === "normal" && after.ls === "0.04em" &&
+      narrow.overflow <= 0 && wide.overflow <= 0 && !wrongWay && flips.some((f) => /:2\/1$/.test(f));
+    return { ok, base, narrow, wide, after, flips };
   },
 
   async failed_build_shows_message_and_retries(page) {

@@ -176,3 +176,19 @@ position it had. After a big jump (3 or more zoom steps, or another section) a "
 pill for 6 seconds. Alt+Left and Alt+Right are always taken by this while a document is open, so they never reach the
 browser's Back; the header's home button and the browser's own Back and Forward still work through the `#/t/<id>`
 hash, and the history is in memory per open document. The log gets a `history` event (`dir`, `via`).
+
+
+## Reading settings
+
+The palette panel has a **Reading** section with two settings, saved in `localStorage['riemann:reading']` as
+`{spacing: bool, width: "narrow"|"normal"|"wide"}` and checked on read like the palette (anything else gives the
+defaults: spacing off, normal):
+
+- **Wider letter spacing** (off by default): `--reading-ls: 0.04em` on the reading text (summaries, source passages,
+  key points, titles, hooks and the overview tiles).
+- **Reading width**: caps one reading column at 34, 40 or 48 em of the 17 px body size (578, 680 or 816 px) with
+  `--read-em`; normal is 40 em, which does not bind at the usual window sizes, so it is the width the reader always had.
+
+Both feed the automatic single column: the character width includes the letter-spacing, and the column cap is the
+reading width, so turning letter-spacing on can turn two columns into one a little sooner. Changing either holds the
+reading position.

@@ -59,6 +59,7 @@
     paletteSlot: 0,
     highlights: [],
     hlContext: null,
+    reading: { spacing: false, width: "normal" },
   };
 
   const el = (id) => document.getElementById(id);
@@ -240,6 +241,74 @@
     root.setProperty("--hl", state.palette.hl);
     if (window.RiemannMap) window.RiemannMap.update();
   }
+
+  // Reading settings: letter-spacing on or off, and the reading column's width. Like the
+  // palette, whatever is read back is checked against the known values.
+  const READING_KEY = "riemann:reading";
+  const READ_WIDTHS = { narrow: 34, normal: 40, wide: 48 };
+  const DEFAULT_READING = { spacing: false, width: "normal" };
+
+  function loadReading() {
+    try {
+      const p = JSON.parse(localStorage.getItem(READING_KEY) || "null");
+      if (p && typeof p === "object") {
+        return {
+          spacing: p.spacing === true,
+          width: typeof p.width === "string" && Object.prototype.hasOwnProperty.call(READ_WIDTHS, p.width) ? p.width : "normal",
+        };
+      }
+    } catch (e) {}
+    return Object.assign({}, DEFAULT_READING);
+  }
+
+  function saveReading() {
+    try {
+      localStorage.setItem(READING_KEY, JSON.stringify(state.reading));
+    } catch (e) {}
+  }
+
+  function applyReadingToCSS() {
+    const root = document.documentElement.style;
+    root.setProperty("--reading-ls", state.reading.spacing ? "0.04em" : "0");
+    root.setProperty("--read-em", String(READ_WIDTHS[state.reading.width]));
+  }
+
+  function renderReadingControls() {
+    el("ls-toggle").setAttribute("aria-pressed", String(state.reading.spacing));
+    for (const b of el("read-width").querySelectorAll("[data-width]")) {
+      b.setAttribute("aria-checked", String(b.dataset.width === state.reading.width));
+      b.tabIndex = b.dataset.width === state.reading.width ? 0 : -1;
+    }
+  }
+
+  // Changing either reflows the text, so hold the reading position and re-decide the columns.
+  function changeReading(next, field) {
+    state.reading = next;
+    saveReading();
+    const apply = () => {
+      applyReadingToCSS();
+      applyColumnMode(false);
+    };
+    if (state.tree && $app.classList.contains("active")) keepReadingPosition(apply);
+    else apply();
+    renderReadingControls();
+    logEvent("reading", { field, value: field === "spacing" ? next.spacing : next.width });
+  }
+
+  el("ls-toggle").addEventListener("click", () => changeReading({ spacing: !state.reading.spacing, width: state.reading.width }, "spacing"));
+  el("read-width").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-width]");
+    if (b && b.dataset.width !== state.reading.width) changeReading({ spacing: state.reading.spacing, width: b.dataset.width }, "width");
+  });
+  el("read-width").addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft" && e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const order = Object.keys(READ_WIDTHS);
+    const i = order.indexOf(state.reading.width) + (e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : -1);
+    changeReading({ spacing: state.reading.spacing, width: order[(i + order.length) % order.length] }, "width");
+    const on = el("read-width").querySelector('[aria-checked="true"]');
+    if (on) on.focus();
+    e.preventDefault();
+  });
 
   function hlStorageKey(treeId) {
     return "riemann:hl:" + treeId;
@@ -655,9 +724,9 @@
     else flip();
   }
 
-  // Maximum width of one reading column in px; null means no cap (item 5 sets it).
+  // Maximum width of one reading column in px (the reading-width setting, in em of the 17 px body).
   function readingMaxPx() {
-    return null;
+    return READ_WIDTHS[state.reading.width] * 17;
   }
 
   if (window.ResizeObserver) {
@@ -3401,6 +3470,9 @@
     }
     state.palette = loadPalette();
     applyPaletteToCSS();
+    state.reading = loadReading();
+    applyReadingToCSS();
+    renderReadingControls();
     if (IS_FIXTURE) {
       const resp = await fetch("dev-fixture.json");
       const tree = await resp.json();
