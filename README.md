@@ -68,7 +68,7 @@ A folding panel on the home page asks about energy, mood, sleep, caffeine and me
 ### Other details
 
 - **Overview card:** above section 01, at every zoom level, a card says what the document is: its own title, a one-sentence description and a few key facts chosen for that kind of document and your goal (for a brief: what to hand in, when it is due, how it is weighted, how to submit, what it is assessed on). Values are short and shown in full, and each has a `¶` link to the passage it came from. Anything the source doesn't say reads "not stated". Documents built before this existed get a card the first time you open them.
-- **Files and links:** paste text, upload a `.md`, `.txt`, `.pdf` or `.docx` file, or give a link. PDF headers, footers and page numbers are removed, numbered headings become sections, and Word headings, lists and tables are kept. A link without `https://` gets it added.
+- **Files and links:** paste text, upload a `.md`, `.txt`, `.pdf` or `.docx` file, or give a link. PDFs are read by layout (paragraph breaks, bullets, two columns and ruled tables, with headers, footers and page numbers removed); numbered headings become sections, and Word headings, lists and tables are kept. Pasted email loses its quoted replies, signature and legal footer. A link without `https://` gets it added.
 - **Minimal chrome:** press **M** to hide the header, section list and side rail and read the text alone. Press **M** again (or the small diamond, bottom right) to bring them back.
 - **Palette:** swap the pastel section colours. The Palette panel closes when you click away.
 - **Key facts and Up next:** the right-hand rail pulls out a key number and previews the next section.
@@ -143,7 +143,7 @@ Other settings:
 
 - A document may be at most **50,000 words** (about 200 pages); paste a chapter at a time for anything bigger.
 - Uploads may be up to 30 MB, pasted text up to 5 MB, a fetched web page up to 15 MB, and a Word file's text up to 40 MB once unpacked.
-- Chinese and Japanese text is not supported yet (words are counted by spaces). Maths in `$...$` shows as source text.
+- Chinese and Japanese text counts each character as about one word and is split at 。！？; Korean counts by its spaces. Maths in `$...$` shows as source text.
 
 ### Security
 

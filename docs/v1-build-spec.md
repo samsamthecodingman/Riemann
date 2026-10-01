@@ -185,6 +185,7 @@ class Tree(BaseModel):
   - `close {tree_id}`
   - `not_helpful {tree_id, z}`: a small "not helpful" link in the chrome
 - **Server** appends `{"ts": iso8601, ...event}` per line. The log is local only, never sent anywhere.
+- **Experiment fields** (optional, on any event: `condition`, `phase`, `doc_label`, `first_zoom_ms`, `max_z`, `session_ms`, `source_checks`, `did_it_help`, `minutes_to_know`, `checklist_score`, `tlx_*`, `missed_later`, `started_within_24h`, `minutes_to_first_action`; plus `experiment` and `outcome` events) are defined in `docs/overview-spec.md` ("Phase 1 data contract") and used by `docs/experiment.md`.
 
 ## Tests (pytest, FakeSummariser, no network)
 - **chunk:** heading splits; the ≤350-word cap; code/procedure/equation atomic; a tiny input gives one leaf.

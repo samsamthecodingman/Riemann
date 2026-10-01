@@ -208,3 +208,47 @@ undated actions last. At most 12.
   the same body comes back. `404` if there is no marker, `409` if that build failed (use `retry`). Re-posting the same
   document to `POST /api/abstract` also just starts a fresh build.
 
+### Experiment events (item 10)
+
+Optional fields for the two-week ABAB protocol (`docs/experiment.md`; the method is R4 in `docs/overnight-review.md`).
+`POST /api/events` accepts them on **any** event; `events.clean_event` drops a value that is the wrong type or
+outside its range and keeps the event. No field is a progress or read mark.
+
+| Field | Values | Meaning |
+|---|---|---|
+| `condition` | `"A"` or `"B"` | A = the original document, B = Riemann |
+| `phase` | `"A1"`, `"B1"`, `"A2"`, `"B2"` | which block of the design |
+| `doc_label` | text, at most 80 characters | the experiment's own name for the document (no document text) |
+| `first_zoom_ms` | number 0 to 86,400,000 | time from open to the first dial input |
+| `max_z` | number 0 to 1 | deepest zoom reached in the session |
+| `session_ms` | number 0 to 86,400,000 | open to close |
+| `source_checks` | integer >= 0 | `hover_source` + `jump_source` in the session |
+| `did_it_help` | boolean | the yes or no asked on close |
+| `minutes_to_know` | number 0 to 1440 | self-timed minutes until "I know what to do" |
+| `checklist_score` | integer 0 to 5 | the fixed five-question checklist, scored against the source |
+| `tlx_mental`, `tlx_physical`, `tlx_temporal`, `tlx_performance`, `tlx_effort`, `tlx_frustration` | number 0 to 100 | NASA-TLX raw sub-scales |
+| `missed_later` | boolean | a week later: did I find I had missed something? |
+| `started_within_24h` | boolean | self-reported |
+| `minutes_to_first_action` | number 0 to 20,160 | first opening to the first real action |
+
+Event types the UI should send (a phase-2 task; nothing sends them yet):
+
+- `experiment {action: "set"|"end", condition, phase, doc_label}`: marks that everything after it, until the next
+  `experiment` event, belongs to that condition, phase and document. Sent when Sam switches condition or document.
+- `close {tree_id, session_ms, first_zoom_ms, max_z, source_checks}`: the existing `close` event with the
+  session numbers added. `first_zoom_ms` is open to the first `dial` event.
+- `did_it_help {tree_id, value}` on close; `outcome {doc_label, minutes_to_know, checklist_score, tlx_*, missed_later,
+  started_within_24h, minutes_to_first_action}`, one per document or several partial ones for the same `doc_label`.
+
+`scripts/experiment_report.py` reads the log and summarises it by phase and condition (`--csv`, `--json`).
+
+### Other phase-1 changes the UI should know about
+
+- **Word counts.** `Tree` word counts (`node.words`, `source_words`) now count each Han or Kana character as about one
+  word, Hangul by its spaces, CJK punctuation not at all. `web/frontier.js` exports `Frontier.countWords(text)` and
+  `Frontier.firstClause(text)` with the same rules (parity-tested against Python); `app.js` has its own `countWords`
+  and `firstClause` copies, which should call these so the reader and the zoom steps agree for Chinese and Japanese.
+- **Chunking.** An over-long paragraph is cut at the latest sentence end, else the latest clause end, never in the
+  middle of a sentence unless the text has neither. Leaves never pack across any heading level.
+- **PDF and email.** PDFs are read by layout; a pasted email loses quoted history, signature and legal footer. Both
+  are server-side only. A ruled PDF table becomes a markdown table leaf (atomic, as before).
