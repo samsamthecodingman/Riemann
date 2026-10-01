@@ -875,30 +875,126 @@
   // kind pill, the document's own title, one plain sentence, and the few
   // essentials as a compact label/value grid (each with a ¶ link to the
   // source). Not a [data-node-id] block, so zoom anchoring ignores it.
+  //
+  // A task-like document ("Do it": an assignment, meeting notes, or a
+  // do/plan goal) adds, in this order: Start here (the one first step),
+  // Due (the deadline, as "Due in 5 days" worked out here from today's date),
+  // Size of the job, then the essentials in the server's act-first order; and,
+  // for meeting notes, an Actions list (who, what, due), earliest first as served.
+  function sourceLinkHTML(cites) {
+    const prov = citesProvenance(cites);
+    return prov
+      ? `<button type="button" class="provenance source-link" data-leaf="${escapeHtml((cites || [])[0] || "")}" title="Read the original text">${escapeHtml(prov)}</button>`
+      : "";
+  }
+
+  // "Due in 5 days" plus the date as written; recomputed on every render.
+  function dueInfo(iso, time, now) {
+    const rel = window.DoIt && window.DoIt.relativeDue(iso, now);
+    if (!rel) return null;
+    return { rel, abs: window.DoIt.dueDateText(iso, time, now) };
+  }
+
+  const START_LABEL = /^(start here|first step|next action)\b/i;
+  const DUE_LABEL = /^(due|deadline|reply by|submit by|submission)\b/i;
+
+  function doItTilesHTML(ov, now) {
+    const tiles = [];
+    if (ov.start_here && ov.start_here.text) {
+      tiles.push(`<div class="ov-item ov-start" style="--sec-n: var(--sec-2)">
+        <dt><span>Start here</span>${sourceLinkHTML(ov.start_here.cites)}</dt>
+        <dd><span>${renderInline(ov.start_here.text)}</span></dd>
+      </div>`);
+    }
+    const dl = ov.deadline;
+    const due = dl && dueInfo(dl.iso, dl.time, now);
+    if (due) {
+      tiles.push(`<div class="ov-item ov-due ov-due-${due.rel.state}" style="--sec-n: var(--sec-3)" data-due-iso="${escapeHtml(dl.iso)}" data-due-time="${escapeHtml(dl.time || "")}">
+        <dt><span>Due</span>${sourceLinkHTML(dl.cites)}</dt>
+        <dd><span><strong class="due-rel">${escapeHtml(due.rel.text)}</strong><span class="due-abs"> &middot; ${escapeHtml(due.abs)}</span>${dl.year_inferred ? ' <span class="year-assumed">year assumed</span>' : ""}${dl.label ? `<span class="due-what">${renderInline(dl.label)}</span>` : ""}</span></dd>
+      </div>`);
+    }
+    const size = ov.size_of_job;
+    if (size && size.text) {
+      tiles.push(`<div class="ov-item ov-size" style="--sec-n: var(--sec-4)">
+        <dt><span>Size of the job</span>${sourceLinkHTML(size.cites)}</dt>
+        <dd><span>${renderInline(size.text)}${size.basis ? `<span class="ov-basis">Based on ${renderInline(size.basis)}</span>` : ""}</span></dd>
+      </div>`);
+    }
+    return { html: tiles.join(""), hasStart: !!tiles.find((t) => t.includes("ov-start")), hasDue: !!due };
+  }
+
+  function actionsHTML(ov, now) {
+    const acts = (ov.actions || []).filter((a) => a && a.who && a.what);
+    if (!acts.length) return "";
+    const rows = acts
+      .map((a) => {
+        const d = a.due_iso ? dueInfo(a.due_iso, null, now) : null;
+        const written = a.due ? escapeHtml(a.due) : d ? escapeHtml(d.abs) : "";
+        const dueHTML = d
+          ? `<span class="act-due act-due-${d.rel.state}"><strong>${escapeHtml(d.rel.text)}</strong>${written ? ` &middot; ${written}` : ""}${a.year_inferred ? ' <span class="year-assumed">year assumed</span>' : ""}</span>`
+          : written
+            ? `<span class="act-due">${written}${a.year_inferred ? ' <span class="year-assumed">year assumed</span>' : ""}</span>`
+            : "";
+        return `<li class="ov-action">
+          <span class="act-who">${escapeHtml(a.who)}</span>
+          <span class="act-body"><span class="act-what">${renderInline(a.what)}</span>
+            <span class="act-meta">${dueHTML}${sourceLinkHTML(a.cites)}</span></span>
+        </li>`;
+      })
+      .join("");
+    return `<div class="ov-actions"><h2 class="ov-actions-head">Actions</h2><ul class="ov-action-list">${rows}</ul></div>`;
+  }
+
   function overviewHTML() {
     const tree = state.tree;
     const ov = tree && tree.overview;
     if (!ov || !ov.doc_title) return "";
+    const now = new Date();
+    const doit = doItTilesHTML(ov, now);
     const items = (ov.essentials || [])
+      .filter((e) => !(doit.hasStart && START_LABEL.test((e.label || "").trim())) && !(doit.hasDue && DUE_LABEL.test((e.label || "").trim())))
       .map((e, i) => {
-        const prov = citesProvenance(e.cites);
-        const provHTML = prov
-          ? `<button type="button" class="provenance source-link" data-leaf="${escapeHtml((e.cites || [])[0] || "")}" title="Read the original text">${escapeHtml(prov)}</button>`
-          : "";
         const stated = !/^not stated\.?$/i.test((e.value || "").trim());
         return `<div class="ov-item" style="--sec-n: var(--sec-${(i % 5) + 1})">
-          <dt><span>${escapeHtml(e.label)}</span>${provHTML}</dt>
+          <dt><span>${escapeHtml(e.label)}</span>${sourceLinkHTML(e.cites)}</dt>
           <dd class="${stated ? "" : "ov-unstated"}"><span>${renderInline(e.value)}</span></dd>
         </div>`;
       })
       .join("");
+    const tiles = doit.html + items;
     return `<section class="overview-card" aria-label="What this document is">
       <span class="ov-kind">${escapeHtml(ov.doc_kind || "")}</span>
       <h1 class="ov-title">${escapeHtml(ov.doc_title)}</h1>
       ${ov.what_it_is ? `<p class="ov-what">${renderInline(ov.what_it_is)}</p>` : ""}
-      ${items ? `<dl class="ov-essentials">${items}</dl>` : ""}
+      ${tiles ? `<dl class="ov-essentials">${tiles}</dl>` : ""}
+      ${actionsHTML(ov, now)}
     </section>`;
   }
+
+  // The day moves on while a document stays open: when the tab comes back,
+  // re-word the due lines in place (no re-render, so nothing shifts).
+  function refreshDueLines() {
+    if (!state.tree || !state.tree.overview || !window.DoIt) return;
+    const now = new Date();
+    const dl = state.tree.overview.deadline;
+    const tile = $content.querySelector(".ov-due");
+    const due = dl && dueInfo(dl.iso, dl.time, now);
+    if (tile && due) {
+      tile.querySelector(".due-rel").textContent = due.rel.text;
+      tile.className = tile.className.replace(/ov-due-\w+/, `ov-due-${due.rel.state}`);
+    }
+    const acts = (state.tree.overview.actions || []).filter((a) => a && a.who && a.what);
+    $content.querySelectorAll(".ov-action").forEach((li, i) => {
+      const a = acts[i];
+      const d = a && a.due_iso ? dueInfo(a.due_iso, null, now) : null;
+      const strong = li.querySelector(".act-due strong");
+      if (d && strong) strong.textContent = d.rel.text;
+    });
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refreshDueLines();
+  });
 
   function contentHTML() {
     const tree = state.tree;

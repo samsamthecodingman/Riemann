@@ -2,6 +2,24 @@
 // Prints one JSON line: {ok: true|false, ...details}. Each check gets a fresh browser context.
 const [pwDir, BASE, TREE, CHECK, ...ARGS] = process.argv.slice(2);
 const { chromium } = require(pwDir);
+const fs = require("fs");
+const path = require("path");
+
+// Build one of tests/fixtures/*.md on the (fake) server and wait until it is done.
+async function buildFixture(name) {
+  const text = fs.readFileSync(path.join(__dirname, "..", "fixtures", name + ".md"), "utf8");
+  return buildText(text);
+}
+async function buildText(text, extra = {}) {
+  const r = await fetch(BASE + "/api/abstract", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, ...extra }) });
+  const { tree_id } = await r.json();
+  for (let i = 0; i < 100; i++) {
+    const t = await (await fetch(`${BASE}/api/tree/${tree_id}`)).json();
+    if (t.status === "done") return tree_id;
+    await new Promise((res) => setTimeout(res, 100));
+  }
+  throw new Error("build did not finish");
+}
 
 const words = (page) =>
   page.evaluate(() =>
@@ -273,6 +291,71 @@ const checks = {
     if (out[1366].cols !== "1") ok = false;
     if (out[1920].cols !== "2") ok = false;
     return { ok, out };
+  },
+
+  async doit_tiles_start_due_size_and_relative_days(page) {
+    const id = await buildFixture("assignment_brief");
+    const tiles = () =>
+      page.evaluate(() => {
+        const items = [...document.querySelectorAll(".overview-card .ov-item")];
+        const card = document.querySelector(".overview-card").getBoundingClientRect();
+        return {
+          classes: items.map((i) => i.className.replace(/ov-item\s*/, "").trim()),
+          labels: items.map((i) => i.querySelector("dt span").innerText.trim().toLowerCase()),
+          due: (document.querySelector(".ov-due dd") || {}).innerText,
+          start: (document.querySelector(".ov-start dd") || {}).innerText,
+          size: (document.querySelector(".ov-size dd") || {}).innerText,
+          startLinks: document.querySelectorAll(".ov-start .source-link").length,
+          clamped: items.some((i) => getComputedStyle(i.querySelector("dd > span")).webkitLineClamp !== "none"),
+          clipped: items.some((i) => i.querySelector("dd").scrollWidth > i.querySelector("dd").clientWidth + 1 || i.scrollHeight > i.clientHeight + 1),
+          cardRight: Math.round(card.right),
+          tilesRight: Math.max(...items.map((i) => Math.round(i.getBoundingClientRect().right))),
+          overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        };
+      });
+    const at = async (iso) => {
+      await page.goto("about:blank");
+      await page.clock.setFixedTime(new Date(iso));
+      await openReader(page, id);
+      return tiles();
+    };
+    const five = await at("2025-11-09T12:00:00");
+    const today = await at("2025-11-14T08:00:00");
+    const tomorrow = await at("2025-11-13T23:30:00");
+    const late = await at("2025-11-16T09:00:00");
+    const order = five.labels.slice(0, 3).join(",") === "start here,due,size of the job";
+    const ok =
+      order &&
+      /Due in 5 days\s*·\s*Fri 14 Nov, 5 pm/.test(five.due) &&
+      /^Due today/.test(today.due) &&
+      /^Due tomorrow/.test(tomorrow.due) &&
+      /Overdue by 2 days/.test(late.due) &&
+      five.startLinks === 1 && /sessions/.test(five.size) &&
+      !five.clamped && !five.clipped && five.overflow <= 0 && five.tilesRight <= five.cardRight;
+    return { ok, order, five, today: today.due, tomorrow: tomorrow.due, late: late.due };
+  },
+
+  async meeting_actions_list_with_relative_days(page) {
+    const id = await buildFixture("meeting");
+    await page.clock.setFixedTime(new Date("2025-10-13T10:00:00"));
+    await openReader(page, id);
+    const r = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll(".ov-action")];
+      return {
+        head: (document.querySelector(".ov-actions-head") || {}).innerText,
+        who: rows.map((r) => r.querySelector(".act-who").innerText),
+        due: rows.map((r) => (r.querySelector(".act-due") || {}).innerText || null),
+        links: rows.map((r) => r.querySelectorAll(".source-link").length),
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        rowOverflow: rows.some((r) => r.scrollWidth > r.clientWidth + 1),
+      };
+    });
+    // earliest first, undated last; the first is Aisha, due Wed 15 Oct = in 2 days from Mon 13 Oct
+    const ok =
+      /^actions$/i.test(r.head) && r.who.length === 5 && r.who[0] === "Aisha Rahman" &&
+      /Due in 2 days/.test(r.due[0]) && /Due in 3 days/.test(r.due[1]) && r.due[4] === null &&
+      r.links.every((n) => n === 1) && r.overflow <= 0 && !r.rowOverflow;
+    return { ok, ...r };
   },
 
   async failed_build_shows_message_and_retries(page) {

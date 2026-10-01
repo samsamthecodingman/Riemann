@@ -14,6 +14,8 @@ CHECKS = [
     "overview_card_renders",
     "phone_layout_no_overflow",
     "columns_switch_to_one_when_lines_get_short",
+    "doit_tiles_start_due_size_and_relative_days",
+    "meeting_actions_list_with_relative_days",
     "cjk_word_count_agrees_with_server",
     "failed_build_shows_message_and_retries",
 ]

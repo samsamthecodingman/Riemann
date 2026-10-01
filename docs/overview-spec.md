@@ -67,6 +67,18 @@ UI: the card sits above section 01 at every zoom level (kind pill, title, senten
 each with its `¶` link; values are shown in full, never clamped: the prompt asks for under 15 words and the validator caps a value at 30). At the gist the hero shows a
 "THE GIST" kicker instead of repeating the title. The header title uses `doc_title`.
 
+"Do it" tiles (`overviewHTML` in `web/app.js`, `web/doit.js`): when the overview has them, the tile grid starts with
+**Start here** (full width, a prominent tile with `start_here.text` and its `¶` link), then **Due**, then **Size of
+the job** (`size_of_job.text`, with `basis` as a "Based on ..." line), then the essentials in the order the server
+sent them (act-first). **Due** is worded in the browser from today's date and `deadline.iso`: "Due in 5 days · Fri 14
+Nov, 5 pm", "Due tomorrow", "Due today", "Overdue by 2 days" (calendar days in the reader's timezone; the time only
+changes the date text; the year is added when it is not this year); `year_inferred` adds a subtle "year assumed". It is
+computed on every render and re-worded when the tab becomes visible again; nothing ticks. An essential whose label is a
+start-here or deadline label is not repeated as a tile when the matching field is shown. For `genre == "meeting"` an
+**Actions** list follows the tiles, one row per `overview.actions` entry, in the served order (earliest due first): who,
+what, then "Due in N days · <date as written>" (or just the date as written when there is no `due_iso`) and the `¶` link.
+Values are never clamped. The tile grid is one column whenever two columns would give under about 45 characters a line.
+
 Old trees: `POST /api/tree/{id}/overview` builds it from the root and section summaries plus the source's leaves
 (first ~4000 words), once per tree; the reader calls it on open when the overview is missing. The result is saved
 into the current cache namespace.
