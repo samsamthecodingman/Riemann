@@ -1,0 +1,1 @@
+Long reads are hard to start and easy to lose your place in. Riemann opens any article, paper or brief as a one-minute gist, then lets you zoom in only where you look, all the way down to the original paragraphs. Built for an ADHD brain: github.com/samsamthecodingman/Riemann
