@@ -1056,9 +1056,16 @@ def get_builder(tree_id: str) -> TreeBuilder | None:
 
 
 def start_build(
-    tree_id: str, title: str, source_text: str, summariser: Summariser, objective: str | None = None
+    tree_id: str,
+    title: str,
+    source_text: str,
+    summariser: Summariser,
+    objective: str | None = None,
+    model: str | None = None,
 ) -> TreeBuilder:
-    """Create a Tree + TreeBuilder and schedule the background build task."""
+    """Create a Tree + TreeBuilder and schedule the background build task. A small "building"
+    marker (the source and the settings) is written first, so a build the server never finished
+    can be offered for resuming; it is removed when the build is done or has failed."""
     tree = Tree(
         id=tree_id,
         title=title,
@@ -1070,15 +1077,24 @@ def start_build(
         status="building",
         provisional_root=False,
         objective=objective if objective in OBJECTIVE_FOCUS else None,
+        model=model,
     )
     builder = TreeBuilder(tree)
     BUILDS[tree_id] = builder
+    try:
+        from riemann.abstraction.cache import save_marker
+
+        save_marker(tree_id, title=title, source_text=source_text, objective=tree.objective, model=model)
+    except Exception:  # noqa: BLE001 - resuming is a convenience; never stop a build for it
+        logging.getLogger("riemann").warning("could not write the building marker", exc_info=True)
     builder.task = asyncio.ensure_future(_run_build(builder, summariser))
     return builder
 
 
 async def _run_build(builder: TreeBuilder, summariser: Summariser) -> None:
     tree = builder.tree
+    from riemann.abstraction.cache import delete_marker
+
     try:
         await _run_build_inner(builder, summariser)
     except Exception as exc:  # noqa: BLE001 - surfaced to clients via the error event
@@ -1088,7 +1104,11 @@ async def _run_build(builder: TreeBuilder, summariser: Summariser) -> None:
         else:
             logging.getLogger("riemann").exception("build failed")
             message = f"Something went wrong while building ({type(exc).__name__}). Nothing was saved; try again."
+        delete_marker(tree.id)
         await builder._emit("error", {"message": message})
+        return
+    # Cancelled (the server stopping) is a BaseException: it skips both paths, so the marker stays.
+    delete_marker(tree.id)
 
 
 async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None:

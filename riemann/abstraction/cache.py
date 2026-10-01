@@ -8,8 +8,10 @@ log dir (events.py mirrors this override -- see docs/v1-build-spec.md,
 from __future__ import annotations
 
 import hashlib
-import re
+import json
 import os
+import re
+import time
 from pathlib import Path
 
 from riemann.abstraction.model import Tree
@@ -22,6 +24,13 @@ def _trees_root() -> Path:
     else:
         base = Path(os.environ.get("XDG_CACHE_HOME", "~/.cache")).expanduser() / "riemann"
     return base / "trees"
+
+
+def building_dir() -> Path:
+    """Where the markers of builds in progress live, beside (not inside) the trees."""
+    d = _trees_root().parent / "building"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def cache_dir() -> Path:
@@ -106,6 +115,39 @@ def load_tree(tree_id: str) -> Tree | None:
 def save_tree(tree: Tree) -> None:
     path = path_for(tree.id)
     path.write_text(tree.model_dump_json(), encoding="utf-8")
+
+
+def save_marker(tree_id: str, *, title: str, source_text: str, objective: str | None, model: str | None) -> None:
+    """Note that a build has started: just enough (the source and the settings) to restart it
+    if the server stops before it finishes. Removed when the build is done or has failed."""
+    if not is_safe_id(tree_id):
+        raise ValueError("invalid tree id")
+    marker = {"id": tree_id, "title": title, "source_text": source_text, "objective": objective, "model": model, "started": time.time()}
+    path = building_dir() / f"{tree_id}.json"
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(marker), encoding="utf-8")
+    tmp.replace(path)
+
+
+def load_marker(tree_id: str) -> dict | None:
+    if not is_safe_id(tree_id):
+        return None
+    path = building_dir() / f"{tree_id}.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("source_text"), str):
+        return None
+    return data
+
+
+def delete_marker(tree_id: str) -> None:
+    if is_safe_id(tree_id):
+        try:
+            (building_dir() / f"{tree_id}.json").unlink()
+        except OSError:
+            pass
 
 
 def exists(tree_id: str) -> bool:

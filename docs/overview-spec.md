@@ -185,3 +185,26 @@ undated actions last. At most 12.
   and month are in the cited leaves (a wrong one is dropped but the action stays). `year_inferred` is as for the deadline.
 - The browser sorts nothing: the order is already the display order. "Which are mine" is not built.
 
+### Rebuild, and builds the server never finished (item 9)
+
+- **`POST /api/tree/{id}/rebuild`** builds the same document again under the current schema, from the tree's stored
+  `source_text` (put through ingest again, so the newer clean-up applies), with the tree's own model (the default model
+  for an old tree that has none) and goal. Response: `{"tree_id": "<new id>", "cached": false}`; follow it like a
+  fresh `POST /api/abstract` (poll `GET /api/tree/{new id}`, or stream its events). The id is the usual hash of
+  text, model and goal, so for a tree that already has a model it is often the **same id**: the new tree is saved in
+  the current cache namespace and shadows the old copy, which stays untouched (read-only) in its old namespace.
+  `{"cached": true}` means that tree already exists under the current schema and nothing was started. `404` for an
+  unknown tree, `409` while that tree is still building.
+- **Building marker.** When a build starts, a small marker (source text, title, goal, model, start time) is written
+  to `<cache>/building/<id>.json`; it is deleted when the build finishes or fails (a failed build is retried with
+  `POST /api/tree/{id}/retry` as before). If the server stops mid-build the marker is left behind.
+- **`GET /api/tree/{id}`** (and `/events`) for an id that has a marker but no live builder and no saved tree answers
+  **`409`** with
+  `{"state": "interrupted", "tree_id": "...", "title": "...", "objective": "learn"|null, "model": "...", "started": <unix seconds>, "message": "..."}`.
+  A live builder, or a saved tree, always wins over a marker (a stale marker is swept). The loading screen can show the
+  message and a "Resume" button.
+- **`POST /api/tree/{id}/resume-build`** restarts it from the marker with the same source, goal and model and returns
+  `{"tree_id": "<same id>"}`; poll it as usual. Idempotent: a build already running, or a finished tree, is left alone and
+  the same body comes back. `404` if there is no marker, `409` if that build failed (use `retry`). Re-posting the same
+  document to `POST /api/abstract` also just starts a fresh build.
+

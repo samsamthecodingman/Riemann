@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
@@ -158,8 +159,7 @@ async def api_abstract(request: Request) -> dict:
         existing = None
     if existing is None:
         summariser = get_summariser(model=model)
-        builder = build.start_build(tree_id, title, text, summariser, objective=objective)
-        builder.tree.model = model
+        build.start_build(tree_id, title, text, summariser, objective=objective, model=model)
 
     return {"tree_id": tree_id, "cached": False}
 
@@ -178,19 +178,89 @@ async def api_retry(tree_id: str) -> dict:
         old = builder.tree
         model = old.model or default_model()
         build.BUILDS.pop(tree_id, None)
-        fresh = build.start_build(tree_id, old.title, old.source_text, get_summariser(model=model), objective=old.objective)
-        fresh.tree.model = model
+        build.start_build(tree_id, old.title, old.source_text, get_summariser(model=model), objective=old.objective, model=model)
     return {"tree_id": tree_id}
 
 
+def _interrupted(marker: dict) -> JSONResponse:
+    """409 body for a build the server stopped in the middle of (a "building" marker, no live builder)."""
+    return JSONResponse(
+        status_code=409,
+        content={
+            "state": "interrupted",
+            "tree_id": marker.get("id"),
+            "title": marker.get("title"),
+            "objective": marker.get("objective"),
+            "model": marker.get("model"),
+            "started": marker.get("started"),
+            "message": "This build was interrupted when Riemann stopped. Nothing is lost: resume it and it starts again from the same text and settings.",
+        },
+    )
+
+
+@app.post("/api/tree/{tree_id}/resume-build")
+async def api_resume_build(tree_id: str) -> dict:
+    """Restart a build the server never finished (GET /api/tree/{id} said "interrupted"), from the
+    source and settings in its marker. A build that is running, or a tree that is done, is left as it is."""
+    builder = build.get_builder(tree_id)
+    if builder is not None:
+        if builder.tree.status == "error":
+            raise HTTPException(409, "that build failed; use retry")
+        return {"tree_id": tree_id}
+    if cache.is_safe_id(tree_id) and cache.exists(tree_id):
+        cache.delete_marker(tree_id)
+        return {"tree_id": tree_id}
+    marker = cache.load_marker(tree_id)
+    if marker is None:
+        raise HTTPException(404, "no such build")
+    model = marker.get("model") if isinstance(marker.get("model"), str) and marker.get("model") not in BLOCKED_MODELS else default_model()
+    objective = marker.get("objective") if marker.get("objective") in build.OBJECTIVE_FOCUS else None
+    build.start_build(
+        tree_id, str(marker.get("title") or "Untitled"), marker["source_text"], get_summariser(model=model), objective=objective, model=model
+    )
+    return {"tree_id": tree_id}
+
+
+@app.post("/api/tree/{tree_id}/rebuild")
+async def api_rebuild(tree_id: str) -> dict:
+    """Build the same document again under the current schema: from the tree's stored source text
+    (put through ingest again), with the same model and goal. The old tree stays. Returns the new
+    tree's id; `cached` is true when that tree already exists under the current schema."""
+    builder = build.get_builder(tree_id)
+    tree = builder.tree if builder is not None else cache.load_tree(tree_id)
+    if tree is None:
+        raise HTTPException(404, "no such tree")
+    if tree.status == "building":
+        raise HTTPException(409, "tree is still building")
+    model = tree.model if tree.model and tree.model not in BLOCKED_MODELS else default_model()
+    title, text = ingest.from_text(tree.source_text, title=tree.title)
+    if not text.strip():
+        raise HTTPException(400, "no content to abstract")
+    new_id = cache.tree_id_for(text, model, tree.objective)
+    if cache.exists(new_id):
+        return {"tree_id": new_id, "cached": True}
+    existing = build.get_builder(new_id)
+    if existing is not None and existing.tree.status == "error":
+        build.BUILDS.pop(new_id, None)
+        existing = None
+    if existing is None:
+        build.start_build(new_id, title, text, get_summariser(model=model), objective=tree.objective, model=model)
+    return {"tree_id": new_id, "cached": False}
+
+
 @app.get("/api/tree/{tree_id}")
-async def api_tree(tree_id: str) -> dict:
+async def api_tree(tree_id: str):
     builder = build.get_builder(tree_id)
     if builder is not None:
         return builder.tree.model_dump()
     tree = cache.load_tree(tree_id)
     if tree is not None:
+        if cache.exists(tree_id):
+            cache.delete_marker(tree_id)  # a finished tree outranks a marker the build never got to remove
         return tree.model_dump()
+    marker = cache.load_marker(tree_id)
+    if marker is not None:
+        return _interrupted(marker)
     raise HTTPException(404, "no such tree")
 
 
@@ -253,12 +323,15 @@ async def api_overview(tree_id: str) -> dict:
 
 
 @app.get("/api/tree/{tree_id}/events")
-async def api_tree_events(tree_id: str) -> EventSourceResponse:
+async def api_tree_events(tree_id: str):
     builder = build.get_builder(tree_id)
 
     if builder is None:
         tree = cache.load_tree(tree_id)
         if tree is None:
+            marker = cache.load_marker(tree_id)
+            if marker is not None:
+                return _interrupted(marker)
             raise HTTPException(404, "no such tree")
 
         async def replay():
