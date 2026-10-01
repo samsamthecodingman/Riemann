@@ -18,6 +18,13 @@ from collections.abc import Callable
 
 from riemann.abstraction import checks
 from riemann.abstraction.chunk import TINY_DOC_WORDS, chunk, head_words, word_count
+from riemann.abstraction.genre import (
+    GENRE_ESSENTIALS,
+    GENRE_FOCUS,
+    GENRES,
+    detect_genre,
+    valid_genre,
+)
 from riemann.abstraction.model import Essential, KeyFact, Node, Overview, Tree
 from riemann.abstraction.summarise import ModelError, Summariser, parse_json_robustly
 
@@ -96,7 +103,8 @@ SYSTEM_ROOT_TEMPLATE = SYSTEM_SUMMARY_TEMPLATE + (
 
 SYSTEM_PROVISIONAL = """You are producing a fast provisional one-line gist for a document, to show while the full abstraction tree builds in the background.
 State the single most important conclusion or takeaway in <= 25 words, not what the document is about.
-Respond with ONLY JSON, no prose outside it and no markdown code fences: {"text": "..."}"""
+Also say what kind of document it is, as "genre": one of "assignment" (an assignment or task brief: something to do, with a deadline or marking), "paper" (a research paper), "news" (a news story), "email" (an email or thread), "meeting" (meeting notes or minutes), "legal" (a contract, policy or rules), "technical" (technical documentation, a guide or a manual), "article" (any other article or essay), "other".
+Respond with ONLY JSON, no prose outside it and no markdown code fences: {"text": "...", "genre": "..."}"""
 
 # Reader-goal focus blocks. These steer WHAT to foreground; the faithfulness
 # rules in the base template stay absolute and are restated in each block.
@@ -153,6 +161,17 @@ def with_objective(system: str, objective: str | None) -> str:
     unknown or missing objective)."""
     focus = OBJECTIVE_FOCUS.get(objective or "")
     return f"{system}\n\n{focus}" if focus else system
+
+
+def with_focus(system: str, objective: str | None, genre: str | None) -> str:
+    """The system prompt plus the document genre's structure (what a summary of this kind of
+    document must cover) and then the reader's goal (what to emphasise inside it). Either may
+    be missing or unknown; "other" has no block."""
+    parts = [system]
+    for block in (GENRE_FOCUS.get(genre or ""), OBJECTIVE_FOCUS.get(objective or "")):
+        if block:
+            parts.append(block)
+    return "\n\n".join(parts)
 
 
 _JSON_RETRY_NOTE = "\n\nYour previous response was not valid JSON. Respond with ONLY valid JSON, no prose, no code fences."
@@ -630,6 +649,8 @@ Respond with ONLY JSON, no prose outside it and no markdown code fences:
 Every value must come from the source. Never invent or guess: if the source does not say (for example no due date is given), write exactly "not stated" for that value and leave its cites empty. Copy numbers, dates, weekday and month names and people's names exactly as the source writes them.
 "cites": leaf ids only, from the "Leaf ids you may cite" list, naming the leaves the value comes from. Every number, weekday and month in a value must appear in a cited leaf, and the value must be in words the cited leaves use."""
 
+GENRE_REQUEST = """Also add "genre": one of assignment, paper, news, email, meeting, legal, technical, article, other (the kind of document this is)."""
+
 # What the reader's goal makes the most useful essentials (appended to the
 # overview prompt after the OBJECTIVE_FOCUS block).
 OVERVIEW_ESSENTIALS: dict[str, str] = {
@@ -643,11 +664,23 @@ OVERVIEW_ESSENTIALS: dict[str, str] = {
 
 
 
+def _essentials_hint(genre: str | None, objective: str | None) -> str:
+    """The essentials hint for the overview prompt: the genre's first, then the reader's goal's."""
+    genre_hint = GENRE_ESSENTIALS.get(genre or "")
+    goal_hint = OVERVIEW_ESSENTIALS.get(objective or "")
+    if genre_hint and goal_hint:
+        return genre_hint + "\n" + goal_hint.replace("For this reader, prefer", "For this reader's goal, also consider")
+    return genre_hint or goal_hint or ""
+
+
 def _overview_system(tree: Tree) -> str:
-    system = with_objective(OVERVIEW_SYSTEM, tree.objective)
-    if tree.objective in OVERVIEW_ESSENTIALS:
-        system += "\n\n" + OVERVIEW_ESSENTIALS[tree.objective]
-    return system
+    genre = tree.genre
+    system = OVERVIEW_SYSTEM
+    if genre is None:
+        system += "\n\n" + GENRE_REQUEST
+    system = with_focus(system, tree.objective, genre)
+    hint = _essentials_hint(genre, tree.objective)
+    return f"{system}\n\n{hint}" if hint else system
 
 
 def _leaf_ids_in_order(tree: Tree) -> list[str]:
@@ -749,6 +782,8 @@ def _clean_overview(raw: object, tree: Tree, warn: Warn | None = None) -> Overvi
     else:
         article = "an" if doc_kind[:1].lower() in "aeiou" else "a"
         what = f"This is {article} {doc_kind[:1].lower() + doc_kind[1:]}."
+    if tree.genre is None:  # an older tree: the model's answer (or "other") settles it
+        tree.genre = valid_genre(raw.get("genre")) or "other"
     all_leaf_ids = {i for i in _leaf_ids_in_order(tree)}
     essentials = _clean_essentials(raw.get("essentials"), tree.nodes, all_leaf_ids, warn)
     return Overview(
@@ -762,9 +797,15 @@ def _clean_overview(raw: object, tree: Tree, warn: Warn | None = None) -> Overvi
 async def generate_overview(tree: Tree, summariser: Summariser, warn: Warn | None = None) -> Overview | None:
     """One model call (root/section summaries + the source's first ~4000 words
     with leaf ids) for the overview card; validated deterministically. None if
-    the tree has no internal structure or the reply is unusable."""
+    the tree has no internal structure or the reply is unusable. A tree with no
+    genre yet (built before genre detection) gets one here: the cue words first,
+    then the model's answer."""
     if tree.root not in tree.nodes or tree.nodes[tree.root].is_leaf:
         return None
+    if tree.genre is None:
+        guessed, strong = detect_genre(tree.title, tree.source_text)
+        if strong:
+            tree.genre = guessed
     prompt, _shown = _overview_prompt(tree)
     result = await _call_summariser_json(summariser, prompt, _overview_system(tree))
     return _clean_overview(result, tree, warn=warn if warn is not None else log_warning)
@@ -875,6 +916,7 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
         tree.max_depth = 0
         tree.status = "done"
         tree.provisional_root = False
+        tree.genre = detect_genre(tree.title, source_text)[0] or "other"
         await builder._emit("leaves", {"nodes": [node.model_dump()]})
         await builder._emit("done", {"tree": tree.model_dump()})
         _save(tree)
@@ -913,13 +955,30 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
     # 1. Fast provisional root. Its model call runs alongside the first layer
     # (it does not depend on it); the event is still emitted before any `level`
     # event, because every level emit awaits `ensure_provisional()` first.
+    #
+    # The same call also names the document's genre. When the cue words already
+    # agree on one (a strong heuristic) the genre is known now and steers every
+    # call. Otherwise the first layer does not wait for it (that would undo the
+    # overlap): its calls carry no genre block; every later layer, the root and
+    # the overview use the model's answer, since a level is only emitted after
+    # the gist call has returned.
     prov_id = _new_id(counter, (0, len(source_text)))
+    guessed, strong = detect_genre(tree.title, source_text)
+    genre_known = asyncio.Event()
+    if strong:
+        tree.genre = guessed
+        genre_known.set()
 
     async def make_provisional() -> None:
-        prov_prompt = _provisional_prompt(source_text, tree.title)
-        prov_result = await _call_summariser_json(
-            summariser, prov_prompt, with_objective(SYSTEM_PROVISIONAL, tree.objective)
-        )
+        try:
+            prov_prompt = _provisional_prompt(source_text, tree.title)
+            prov_result = await _call_summariser_json(
+                summariser, prov_prompt, with_focus(SYSTEM_PROVISIONAL, tree.objective, tree.genre)
+            )
+            if not strong:
+                tree.genre = valid_genre(prov_result.get("genre")) or guessed or "other"
+        finally:
+            genre_known.set()
         raw_prov = prov_result.get("text")
         prov_text = raw_prov.strip() if isinstance(raw_prov, str) else ""
         prov_text = _cap_chars(_truncate_words(prov_text, 80), 600) or "(gist coming...)"
@@ -947,7 +1006,9 @@ async def _run_build_inner(builder: TreeBuilder, summariser: Summariser) -> None
         await prov_task
 
     try:
-        await _build_levels(builder, summariser, leaf_ids, boundary_keys, counter, prov_id, ensure_provisional)
+        await _build_levels(
+            builder, summariser, leaf_ids, boundary_keys, counter, prov_id, ensure_provisional, genre_known.wait
+        )
     finally:
         if not prov_task.done():
             prov_task.cancel()
@@ -962,6 +1023,7 @@ async def _build_levels(
     counter: list[int],
     prov_id: str,
     ensure_provisional,
+    genre_known,
 ) -> None:
     tree = builder.tree
     nodes = tree.nodes
@@ -973,11 +1035,13 @@ async def _build_levels(
         if len(group_ids) == 1 and not force:
             return group_ids[0], None  # collapse: carried up unsummarised
 
+        if is_root_call:
+            await genre_known()  # the root summary always has the final genre; earlier calls never wait for it
         async with sem:
             child_words = sum(nodes[c].words for c in group_ids)
             target = max(1, round(child_words / RATIO))
             system_template = SYSTEM_ROOT_TEMPLATE if is_root_call else SYSTEM_SUMMARY_TEMPLATE
-            system = with_objective(system_template.replace("{{TARGET}}", str(target)), tree.objective)
+            system = with_focus(system_template.replace("{{TARGET}}", str(target)), tree.objective, tree.genre)
             prompt, leaf_ctx_ids = _build_prompt(nodes, group_ids)
 
             result = await _call_summariser_json(summariser, prompt, system)

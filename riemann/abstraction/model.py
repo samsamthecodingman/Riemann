@@ -98,6 +98,9 @@ class Tree(BaseModel):
     """Node ids at the section level: the first depth from the root with
     >=2 nodes. Empty for a single-leaf tree or a tree that never branches
     (a straight chain from root to one leaf). See build.compute_sections."""
+    genre: str | None = None
+    """Document genre: a key of genre.GENRES (assignment, paper, news, email, meeting, legal,
+    technical, article, other); None for trees built before genre detection."""
     overview: Overview | None = None
     """"What is this" card (see Overview); None for trees built before it
     existed, until the backfill endpoint adds it."""

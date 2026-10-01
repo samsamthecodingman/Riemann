@@ -73,14 +73,14 @@ into the current cache namespace.
 
 ## Cache namespaces
 
-`SCHEMA_VERSION = "schema6"`. `/api/recent`, `/api/tree/{id}` and open-by-id fall back, read-only, to older
+`SCHEMA_VERSION = "schema7"`. `/api/recent`, `/api/tree/{id}` and open-by-id fall back, read-only, to older
 build-version dirs (and the flat `trees/` dir), so documents built earlier still open. Nothing is written to them.
 
 ## Phase 1 data contract
 
 What the backend now produces for the reader (phase 2 builds the UI on it). Everything is additive and
 optional: an old tree, or one where a check removed a field, simply lacks it, and nothing here needs a progress
-bar, a read mark or a "checked" tick. The cache namespace is `schema6`; older trees still open read-only.
+bar, a read mark or a "checked" tick. The cache namespace is `schema7`; older trees still open read-only.
 
 To see example values without a model, run the fake-summariser app and paste the sample documents in
 `tests/fixtures/` (an assignment brief, a paper and meeting notes; they are synthetic):
@@ -112,4 +112,31 @@ checked against the leaves they cite, and dropped when a check fails:
 Measured on the 15 cached trees (64 key facts and 12 essentials with cites): the date and overlap checks drop
 0 of 76 real items (before: 0). As a control, the same items cited to a random other leaf of their document are
 dropped 93.2% of the time (the old number check alone: 86.8%). The qualifier check would warn on 7 of 76.
+
+### Genre (`Tree.genre`)
+
+`Tree.genre` is one of `assignment`, `paper`, `news`, `email`, `meeting`, `legal`, `technical`, `article`, `other`
+(plain labels for display: "Assignment or task brief", "Research paper", "News article", "Email or thread", "Meeting
+notes", "Legal or policy document", "Technical documentation", "General article", "Other"; see `genre.GENRES`).
+It is `null` only for trees built before genre detection, and for those it is filled in when the overview is
+backfilled (`POST /api/tree/{id}/overview`, which saves the tree). The reader does not need it for anything but
+labels; the overview fields below depend on it.
+
+How it is decided (no extra model call):
+
+1. `genre.detect_genre(title, text)`: cue words in the title, headings and first ~3,500 characters (an email's own
+   headers, "Abstract" plus IMRaD headings, "(Reuters)", "Attendees"/"Actions", "shall"/"pursuant to", code fences
+   plus "Installation"/"Usage" headings, "due"/"submit"/"marking criteria" ...). A strong result is used for every call
+   from the start.
+2. Otherwise the quick provisional-gist call also returns `"genre"`; the root summary, every layer after the first,
+   and the overview use it (the first layer never waits for it, so it keeps its overlap with the gist call). If that
+   reply is missing or not one of the keys, a weak cue-word guess is used, else `other`.
+
+Each genre has a `GENRE_FOCUS` block (what a summary of that kind of document must cover: an assignment unpacks the
+task and puts constraints first; a paper keeps question, method and sample, main result with its number, and limits;
+news keeps the lede and attribution; email puts the ask first and separates decided from open; meeting notes keep
+decisions and who-does-what-by-when; legal keeps "must", "unless" and deadlines; technical docs keep how-to steps in
+order). It is added to the summary, root and overview prompts before the goal's `OBJECTIVE_FOCUS` block, so the goal
+still decides what to emphasise. `GENRE_ESSENTIALS` gives the overview its labels (a paper: Question, Method and sample,
+Main result, Limits); the goal's hint follows it.
 

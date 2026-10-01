@@ -324,6 +324,7 @@ _GOAL_TITLE_PREFIX = {
 }
 
 _TARGET_RE = re.compile(r"Target length: about (\d+) words")
+_LEAF_BLOCK_RE = re.compile(r"^--- leaf (\S+) ---\n(.*?)(?=^--- leaf |\n\nLeaf ids you may cite)", re.MULTILINE | re.DOTALL)
 _CHILD_IDS_RE = re.compile(r"^Child ids \(in order\): (.*)$", re.MULTILINE)
 _SHORT_IDS_RE = re.compile(r"^Short-title node ids: (.*)$", re.MULTILINE)
 _LEAF_IDS_RE = re.compile(r"^Leaf ids you may cite \(in order\): (.*)$", re.MULTILINE)
@@ -357,24 +358,30 @@ class FakeSummariser:
         doc_title = (title_match.group(1).strip() if title_match else "") or "Untitled"
         leaf_match = _LEAF_IDS_RE.search(prompt)
         leaf_ids = [x for x in leaf_match.group(1).split(", ") if x] if leaf_match else []
-        first_leaf = re.search(r"^--- leaf (\S+) ---\n(.*?)(?=^--- leaf |\n\nLeaf ids you may cite)", prompt, re.MULTILINE | re.DOTALL)
-        words = [w for w in (first_leaf.group(2).split() if first_leaf else []) if w.isalpha()]
+        blocks = [(m.group(1), m.group(2).strip()) for m in _LEAF_BLOCK_RE.finditer(prompt)]
+        first_leaf = blocks[0] if blocks else None
+        words = [w for w in (first_leaf[1].split() if first_leaf else []) if w.isalpha()]
         goal_match = _GOAL_RE.search(system)
         goal = goal_match.group(1) if goal_match else None
+        genre_match = re.search(r"Document genre: (\w+)", system)
+        genre = genre_match.group(1) if genre_match else None
         labels = ["Deliverables", "Due", "What you need to do"] if goal == "execute" else ["Main point", "Detail", "Context"]
         cites = leaf_ids[:1]
         essentials = [
             {"label": label, "value": " ".join(words[i * 4 : i * 4 + 4]) or "not stated", "cites": cites}
             for i, label in enumerate(labels)
         ]
-        return json.dumps(
-            {
-                "doc_title": doc_title,
-                "doc_kind": "Assignment brief" if goal == "execute" else "Document",
-                "what_it_is": "This is " + " ".join(words[:8]) + ".",
-                "essentials": essentials,
-            }
-        )
+        out = {
+            "doc_title": doc_title,
+            "doc_kind": "Assignment brief" if goal == "execute" else "Document",
+            "what_it_is": "This is " + " ".join(words[:8]) + ".",
+            "essentials": essentials,
+        }
+        if genre is None:
+            from riemann.abstraction.genre import detect_genre
+
+            out["genre"] = detect_genre(doc_title, "\n".join(t for _, t in blocks))[0] or "other"
+        return json.dumps(out)
 
     async def summarise(self, prompt: str, system: str) -> str:
         combined = system + "\n" + prompt
@@ -382,6 +389,15 @@ class FakeSummariser:
         # Overview card (build.generate_overview).
         if "Task: overview" in prompt:
             return self._overview(prompt, system)
+
+        # Provisional gist (build.make_provisional): {"text": ..., "genre": ...}.
+        if system.startswith("You are producing a fast provisional"):
+            from riemann.abstraction.genre import detect_genre
+
+            title_match = re.match(r"Title: (.*)\n", prompt)
+            guessed = detect_genre(title_match.group(1) if title_match else "", prompt)[0] or "other"
+            body = " ".join(prompt.split()[:20]) or "(empty)"
+            return json.dumps({"text": body, "genre": guessed})
 
         # Short-title backfill (build.backfill_short_titles): {node_id: label}.
         short_match = _SHORT_IDS_RE.search(prompt)
