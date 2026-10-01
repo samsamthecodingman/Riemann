@@ -13,6 +13,7 @@ CHECKS = [
     "xss_payload_in_tree_text_is_escaped",
     "overview_card_renders",
     "phone_layout_no_overflow",
+    "columns_switch_to_one_when_lines_get_short",
     "cjk_word_count_agrees_with_server",
     "failed_build_shows_message_and_retries",
 ]

@@ -75,7 +75,7 @@ A CSS grid: `300px | minmax(0,1fr) | 380px` columns and a `72px | 1fr` row. The 
     - an `h1` title in Fraunces 46/1.1
     - the `hook` as a 19 px muted lede
   - Then that section's frontier nodes, each as a block with an `h2` subhead (the node `title`, 17 px bold) and its text. The **text of leaves is verbatim**.
-  - Blocks flow in a **2-column grid** (`repeat(2,minmax(0,1fr))`, gap 36 px) within each section. Code, equations and atomic nodes span both columns.
+  - Blocks flow in a **2-column grid** (`repeat(2,minmax(0,1fr))`, gap 36 px) within each section when each column would hold about 45 characters (otherwise one column; see "Automatic single column" below). Code, equations and atomic nodes span both columns.
   - Summaries vs originals: summaries in Work Sans 17 px `--body`; originals in the same face, with a 2 px left rule in the section hue plus the subhead. The distinction must be legible without colour: keep the rule, and add a small `¶ n` provenance label next to the subhead of original text, and `¶ a–b` on summaries.
   - When the frontier is just the root, show the root as a big Fraunces hero with its hook.
 - **Right rail** (sticky, top 72 + 36 px), for the **current section**:
@@ -84,7 +84,7 @@ A CSS grid: `300px | minmax(0,1fr) | 380px` columns and a `72px | 1fr` row. The 
   3. **UP NEXT · NN**: the next section's title (Fraunces 21) and hook. Clicking jumps there.
   - The rail cards crossfade (180 ms) when the current section changes, with an instant fallback under reduced motion.
 - **Minimal chrome (`m`):** hides the header, nav, map, rail and column handles (faded, then `visibility: hidden` so they leave the Tab order, and with zero padding so they cannot widen the page); the middle goes full width (capped at 1200 px). The small diamond, bottom right, and `m` bring the chrome back.
-- **Reading width:** two columns need room. When the reading area is under 560 px (a container query on `#content`) the section grid falls back to one column; at 1366x768 it stays two.
+- **Automatic single column:** two columns only while each would still give about 45 characters a line (`MIN_CPL` in `app.js`). `applyColumnMode` measures the average character width of running text in the real reader font (a hidden probe, canvas `measureText`, plus letter-spacing, with 10% allowed for words that wrap), takes the reading area's inner width, and sets `.one-col` on `#content` (the section grid) and `.ov-one-col` (the overview tiles) when two columns would be under that. It re-runs on resize, font load, column drags, map open and close, and settings changes, holding the reading position across the reflow. At 1366x768 with the nav and rail open the reader is one column (about 65 characters a line; two columns gave about 24); two columns return when each can hold about 45 (about 1920 wide). `#content` carries `data-cols` and `data-cpl` (the estimate) for tests.
 - **Breadcrumb:** unnecessary now (the nav shows position), so remove it.
 - **Tablet and phone (< 1100 px):** single column. The nav becomes a horizontally scrollable pill row under the header. The rail cards move below each section header. The header's two-line block becomes one line. It must work at 390 px with a 16 px gutter.
 - **Start screen and "gist coming…":** restyle in Macaron (cream, Fraunces heading, panel cards, ink primary button). The recent list stays as plain links.

@@ -245,6 +245,12 @@
   <button id="minimal-toggle" title="Toggle minimal chrome (m)" aria-label="Toggle minimal chrome">&#9670;</button>
 </div>
 
+<!-- Hidden probes: the real reader fonts, so the column logic measures what is drawn. -->
+<div id="col-probes" aria-hidden="true">
+  <div class="node-body" id="probe-body">x</div>
+  <div id="probe-tile">x</div>
+</div>
+
 <div id="live-region" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
 
 <script src="objective.js"></script>

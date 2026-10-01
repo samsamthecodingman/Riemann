@@ -27,6 +27,34 @@ function watch(page) {
   return errors;
 }
 
+// Characters on the first rendered line of the longest source paragraph on screen.
+const firstLineChars = (page) =>
+  page.evaluate(() => {
+    const ps = [...document.querySelectorAll("#content .node.leaf .node-body p")].filter((p) => p.textContent.length > 200);
+    const p = ps[0];
+    if (!p) return null;
+    const tn = document.createTreeWalker(p, NodeFilter.SHOW_TEXT).nextNode();
+    const r = document.createRange();
+    r.setStart(tn, 0);
+    let top = null;
+    for (let i = 1; i <= tn.length; i++) {
+      r.setEnd(tn, i);
+      const rects = r.getClientRects();
+      const t = rects[rects.length - 1].top;
+      if (top == null) top = t;
+      if (Math.abs(t - top) > 4) return { chars: i - 1, width: Math.round(p.getBoundingClientRect().width) };
+    }
+    return null;
+  });
+
+async function deepZoom(page) {
+  for (let i = 0; i < 30; i++) {
+    await page.keyboard.press("=");
+    await page.waitForTimeout(60);
+  }
+  await page.waitForTimeout(400);
+}
+
 const checks = {
   async zoom_grows_words(page) {
     await openReader(page);
@@ -225,6 +253,26 @@ const checks = {
     const shown = await page.innerText("#paste-count");
     const py = await page.evaluate((t) => window.Frontier.countWords(t), text);
     return { ok: py === 16 && /^16 words/.test(shown), shown, py };
+  },
+
+  async columns_switch_to_one_when_lines_get_short(page) {
+    const out = {};
+    let ok = true;
+    for (const w of [1366, 1600, 1920]) {
+      await page.setViewportSize({ width: w, height: 900 });
+      await openReader(page);
+      await deepZoom(page);
+      await page.waitForTimeout(300);
+      const info = await page.evaluate(() => ({ cols: document.querySelector("#content").dataset.cols, est: +document.querySelector("#content").dataset.cpl, grid: getComputedStyle(document.querySelector(".section-grid")).gridTemplateColumns.split(" ").length }));
+      const m = await firstLineChars(page);
+      out[w] = { ...info, measured: m && m.chars, colWidth: m && m.width };
+      // never two columns under ~45 characters, and never one column where two would have fit
+      if (info.cols === "2" && !(m && m.chars >= 45)) ok = false;
+      if (info.grid !== (info.cols === "2" ? 2 : 1)) ok = false;
+    }
+    if (out[1366].cols !== "1") ok = false;
+    if (out[1920].cols !== "2") ok = false;
+    return { ok, out };
   },
 
   async failed_build_shows_message_and_retries(page) {

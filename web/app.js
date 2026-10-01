@@ -586,6 +586,97 @@
   });
 
   // ---------------------------------------------------------------------
+  // Reader columns: two only while each still gets a comfortable line
+  // ---------------------------------------------------------------------
+  const MIN_CPL = 45; // characters per line below which two columns turn into one
+  const SAMPLE_TEXT = "It was the best of times, it was the worst of times, it was the age of wisdom, it was the age of foolishness.";
+  // A real line is a little shorter than width / average character width: a word that
+  // does not fit moves down. Measured at about 10% on running English text.
+  const WRAP_LOSS = 1.1;
+  let measureCtx = null;
+  const charWidthCache = new Map();
+
+  // Average character width of running text in the font of a probe element.
+  function avgCharWidth(probeId) {
+    const probe = el(probeId);
+    if (!probe) return 0;
+    const cs = getComputedStyle(probe);
+    const font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    const ls = parseFloat(cs.letterSpacing) || 0;
+    const key = font + "|" + ls;
+    if (charWidthCache.has(key)) return charWidthCache.get(key);
+    if (!measureCtx) measureCtx = document.createElement("canvas").getContext("2d");
+    measureCtx.font = font;
+    const w = (measureCtx.measureText(SAMPLE_TEXT).width / SAMPLE_TEXT.length + ls) * WRAP_LOSS;
+    charWidthCache.set(key, w);
+    return w;
+  }
+
+  // The reading column's content width, in px (the padding is not text room).
+  function contentInnerWidth() {
+    const cs = getComputedStyle($content);
+    return $content.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+  }
+
+  // How many columns the reading grid and the overview tiles get at the current
+  // width, font, letter-spacing and reading width, with the characters per line
+  // each choice gives. Pure given its inputs, so it can be tested.
+  function columnPlan(innerW, charW, opts) {
+    const gap = opts.gap;
+    const maxCol = opts.maxCol == null ? Infinity : opts.maxCol;
+    const twoW = Math.min((innerW - gap) / 2, maxCol);
+    const oneW = Math.min(innerW, maxCol);
+    const cpl = (w) => (charW > 0 ? Math.max(0, (w - opts.pad) / charW) : 99);
+    const two = cpl(twoW) >= MIN_CPL;
+    return { two, cpl: two ? cpl(twoW) : cpl(oneW), cplTwo: cpl(twoW), cplOne: cpl(oneW) };
+  }
+
+  // Sets .one-col / .ov-one-col on #content. Called while (re)rendering, and,
+  // with keep = true, when only the width or a setting changed (the reading
+  // position is held across the reflow).
+  function applyColumnMode(keep) {
+    if (!$app.classList.contains("active")) return;
+    const innerW = contentInnerWidth();
+    if (innerW <= 0) return;
+    const bodyCw = avgCharWidth("probe-body");
+    const tileCw = avgCharWidth("probe-tile");
+    const grid = columnPlan(innerW, bodyCw, { gap: 36, pad: 16, maxCol: readingMaxPx() });
+    const tiles = columnPlan(innerW, tileCw, { gap: 6, pad: 20, maxCol: Infinity });
+    const wantOne = !grid.two;
+    const wantOvOne = !tiles.two;
+    $content.dataset.cols = grid.two ? "2" : "1";
+    $content.dataset.cpl = String(Math.round(grid.cpl));
+    if ($content.classList.contains("one-col") === wantOne && $content.classList.contains("ov-one-col") === wantOvOne) return;
+    const flip = () => {
+      $content.classList.toggle("one-col", wantOne);
+      $content.classList.toggle("ov-one-col", wantOvOne);
+    };
+    if (keep && state.tree) keepReadingPosition(flip);
+    else flip();
+  }
+
+  // Maximum width of one reading column in px; null means no cap (item 5 sets it).
+  function readingMaxPx() {
+    return null;
+  }
+
+  if (window.ResizeObserver) {
+    let lastW = 0;
+    new ResizeObserver(() => {
+      const w = $content.clientWidth;
+      if (w === lastW) return;
+      lastW = w;
+      applyColumnMode(true);
+    }).observe($content);
+  }
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => {
+      charWidthCache.clear();
+      applyColumnMode(true);
+    });
+  }
+
+  // ---------------------------------------------------------------------
   // Rendering
   // ---------------------------------------------------------------------
   // A summary is shown in one of two forms: skim (its title plus key-point
@@ -914,6 +1005,7 @@
     if (window.RiemannMap) window.RiemannMap.update();
 
     function doRender() {
+      applyColumnMode(false);
       $content.innerHTML = contentHTML();
       applyHighlightsToDOM();
       updateHeader();

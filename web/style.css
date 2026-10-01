@@ -1034,13 +1034,19 @@ kbd {
   margin-top: 18px;
 }
 
-/* The two-column flow needs room: below ~560px of reading width each column would be
-   under 250px (about 20 characters a line, and 9 at 1100px wide with the nav and rail
-   open). Fall back to one column there. */
-@container reader (max-width: 559px) {
-  .section-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
+/* Two columns only when each would still give a comfortable line (about 45
+   characters). app.js measures that with the real font and sets .one-col on
+   #content (the reading grid) and .ov-one-col (the overview tiles). */
+#content.one-col .section-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#col-probes {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .node {
@@ -1317,7 +1323,8 @@ button.source-link:focus-visible .source-link-more {
   color: var(--fact-label);
 }
 
-.ov-item dd {
+.ov-item dd,
+#probe-tile {
   margin: 1px 0 0;
   font-size: 13px;
   line-height: 1.38;
@@ -1335,6 +1342,10 @@ button.source-link:focus-visible .source-link-more {
   letter-spacing: 0;
   text-transform: none;
   font-weight: 500;
+}
+
+#content.ov-one-col .ov-essentials {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 @media (max-width: 720px) {
