@@ -7,6 +7,7 @@ string plus a best-effort title, so chunk.py has one uniform input shape.
 from __future__ import annotations
 
 import io
+import logging
 import re
 
 import httpx
@@ -99,6 +100,21 @@ def strip_running_headers(pages: list[str]) -> list[str]:
 
 
 def _from_pdf(filename: str, content: bytes) -> tuple[str, str]:
+    """Layout-aware extraction (pdfplumber: paragraphs, bullets, columns, tables) first; pypdf's
+    plain word stream if that fails or finds no text."""
+    from riemann.abstraction import pdftext
+
+    text = ""
+    try:
+        text = normalise_text(pdftext.extract_pages(content))
+    except Exception:  # noqa: BLE001 - any trouble with the richer reader: use the plain one
+        logging.getLogger("riemann").info("layout PDF extraction failed; using pypdf", exc_info=True)
+    if not text.strip():
+        text = _pypdf_text(content)
+    return (_title_from_text(text, filename), text)
+
+
+def _pypdf_text(content: bytes) -> str:
     from pypdf import PdfReader
 
     reader = PdfReader(io.BytesIO(content))
@@ -108,9 +124,7 @@ def _from_pdf(filename: str, content: bytes) -> tuple[str, str]:
         if page_text.strip():
             pages.append(page_text.strip())
     parts = strip_running_headers(pages)
-    text = normalise_text("\n\n".join(p for p in parts if p.strip()))
-    title = _title_from_text(text, filename)
-    return (title, text)
+    return normalise_text("\n\n".join(p for p in parts if p.strip()))
 
 
 MAX_DOCX_XML_BYTES = 40 * 1024 * 1024  # word/document.xml inflated; a 300-page report is about 2 MB
