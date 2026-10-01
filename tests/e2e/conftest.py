@@ -7,6 +7,7 @@ activity log and never calls a model."""
 
 from __future__ import annotations
 
+import glob
 import json
 import os
 import shutil
@@ -46,6 +47,8 @@ def _playwright_dir() -> str | None:
         except Exception:
             pass
     candidates.append(str(ROOT / "node_modules" / "playwright"))
+    # An `npx playwright` cache install, e.g. ~/.npm/_npx/<hash>/node_modules/playwright.
+    candidates.extend(sorted(glob.glob(os.path.expanduser("~/.npm/_npx/*/node_modules/playwright"))))
     for c in candidates:
         if c and os.path.isfile(os.path.join(c, "package.json")):
             return c

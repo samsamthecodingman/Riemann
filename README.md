@@ -164,7 +164,7 @@ npm install --no-save playwright && npx playwright install chromium   # once, in
 RIEMANN_E2E=1 uv run pytest -q tests/e2e                              # about two minutes
 ```
 
-They are skipped unless `RIEMANN_E2E=1` is set, and skipped with a message if Node, the `playwright` package or a Chromium build is missing. If Playwright lives somewhere else, point `RIEMANN_PLAYWRIGHT` at its folder (for example `~/.npm/_npx/<hash>/node_modules/playwright`).
+They are skipped unless `RIEMANN_E2E=1` is set, and skipped with a message if Node, the `playwright` package or a Chromium build is missing. The package is found in `$RIEMANN_PLAYWRIGHT`, a global npm install, `./node_modules`, or an `npx playwright` cache (`~/.npm/_npx/*/node_modules/playwright`); if it lives somewhere else, point `RIEMANN_PLAYWRIGHT` at its folder.
 
 ## How it works
 
