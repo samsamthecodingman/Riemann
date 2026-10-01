@@ -216,6 +216,17 @@ const checks = {
     return { ok: r.card && r.essentials >= 3 && r.labelled && !r.clamped, ...r };
   },
 
+  async cjk_word_count_agrees_with_server(page) {
+    await page.goto(BASE + "/");
+    // 11 Han characters + 2 Kana + 3 spaced words + CJK punctuation: 16 words by the server's rule.
+    const text = "今天天氣很好我們去公園。ひら 3 words here";
+    await page.fill("#paste-text", text);
+    await page.waitForTimeout(200);
+    const shown = await page.innerText("#paste-count");
+    const py = await page.evaluate((t) => window.Frontier.countWords(t), text);
+    return { ok: py === 16 && /^16 words/.test(shown), shown, py };
+  },
+
   async failed_build_shows_message_and_retries(page) {
     const text = "FAILME-ONCE " + Array.from({ length: 60 }, (_, i) => `Sentence ${i} about the harbour and its tides.`).join(" ")
       + "\n\n" + Array.from({ length: 60 }, (_, i) => `Another ${i} point about the survey boats.`).join(" ");

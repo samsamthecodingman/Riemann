@@ -270,9 +270,9 @@
   // ---------------------------------------------------------------------
   // Word / reading-time helpers
   // ---------------------------------------------------------------------
-  function countWords(text) {
-    return ((text || "").match(/\S+/g) || []).length;
-  }
+  // Same rules as the server (Han and Kana count per character), so zoom steps
+  // and read times agree for Chinese and Japanese.
+  const countWords = (text) => window.Frontier.countWords(text);
 
   function isSkim(node, prose) {
     return !node.is_leaf && node.id !== state.tree.root && !prose.has(node.id) && hasSkimContent(node);
@@ -421,10 +421,7 @@
     return null;
   }
 
-  function firstClause(text) {
-    const m = (text || "").match(/^[^.!?\n]{1,80}/);
-    return (m ? m[0] : text || "").trim();
-  }
+  const firstClause = (text) => window.Frontier.firstClause(text);
 
   function nodeTitle(node) {
     return (node && (node.title || firstClause(node.text))) || "";
@@ -2255,7 +2252,7 @@
   });
 
   function updatePasteCount() {
-    const words = ($pasteText.value.trim().match(/\S+/g) || []).length;
+    const words = countWords($pasteText.value.trim());
     el("paste-count").textContent = words ? `${words.toLocaleString()} words · ~${Math.max(1, Math.round(words / WPM))} min to read in full` : "";
   }
   $pasteText.addEventListener("input", () => {
