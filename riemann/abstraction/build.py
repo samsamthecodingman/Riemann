@@ -1409,16 +1409,8 @@ async def _build_levels(
     if prov_id in nodes and prov_id != final_root_id:
         del nodes[prov_id]
 
-    def assign_depth(node_id: str, depth: int) -> None:
-        nodes[node_id].depth = depth
-        for child_id in nodes[node_id].children:
-            assign_depth(child_id, depth + 1)
-
-    collapse_single_child_chains(nodes, final_root_id)
-    assign_depth(final_root_id, 0)
     tree.nodes = nodes
-    tree.max_depth = max(n.depth for n in nodes.values())
-    tree.sections = compute_sections(tree)
+    remove_pass_through_levels(tree)
 
     # The overview is part of "done": anything polling the tree's status must
     # not see a finished tree that is about to gain its card.
@@ -1434,6 +1426,32 @@ async def _build_levels(
 
     _save(tree)
     await builder._emit("done", {"tree": tree.model_dump()})
+
+
+def has_pass_through_level(tree: Tree) -> bool:
+    """Whether an internal node of the tree has a single child (a level that only rewords its
+    child). Trees built since schema4 have none; older ones do, and so does any of them that an
+    old-schema copy was backfilled into the current cache namespace."""
+    return any(
+        not n.is_leaf and len(n.children) == 1 and (n.id != tree.root or not tree.nodes[n.children[0]].is_leaf)
+        for n in tree.nodes.values()
+    )
+
+
+def remove_pass_through_levels(tree: Tree) -> None:
+    """Collapse single-child chains (see collapse_single_child_chains), then depths, max_depth and
+    the sections, which all follow from the shape. Used when a build finishes and when a tree is
+    read from the cache, so a tree built before the collapse existed zooms like a current one."""
+    collapse_single_child_chains(tree.nodes, tree.root)
+
+    def assign_depth(node_id: str, depth: int) -> None:
+        tree.nodes[node_id].depth = depth
+        for child_id in tree.nodes[node_id].children:
+            assign_depth(child_id, depth + 1)
+
+    assign_depth(tree.root, 0)
+    tree.max_depth = max(n.depth for n in tree.nodes.values())
+    tree.sections = compute_sections(tree)
 
 
 def collapse_single_child_chains(nodes: dict[str, Node], root_id: str) -> None:

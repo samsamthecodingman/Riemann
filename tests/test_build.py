@@ -508,3 +508,76 @@ async def test_title_plus_h2_sections_become_separate_sections_in_a_built_tree()
     await builder.task
     tree = builder.tree
     assert len(tree.sections) >= 4, len(tree.sections)
+
+
+# --- pass-through levels in trees read from the cache ----------------------------
+
+
+def _chain_tree():
+    from tests.test_frontier import _skim_tree
+
+    return _skim_tree(True)  # root -> A -> B -> two sections of three paragraphs
+
+
+def test_a_cached_tree_with_a_pass_through_chain_is_collapsed_when_read(tmp_path, monkeypatch):
+    """A tree from before chains were collapsed (or backfilled from one into the current
+    namespace, which is how Sam's brief kept its three-level chain under schema7) opens
+    without the chain, depths and sections following from the new shape. The file is untouched."""
+    from riemann.abstraction import cache
+
+    monkeypatch.setenv("RIEMANN_DATA_DIR", str(tmp_path))
+    tree = _chain_tree()
+    assert [tree.nodes[n].depth for n in ("root", "A", "B", "S1")] == [0, 1, 2, 3]
+    cache.save_tree(tree)
+    on_disk = cache.path_for(tree.id).read_text(encoding="utf-8")
+
+    loaded = cache.load_tree(tree.id)
+    assert loaded.nodes[loaded.root].children == ["S1", "S2"]
+    assert set(loaded.nodes) == {"root", "S1", "S2", "S1a", "S1b", "S1c", "S2a", "S2b", "S2c"}
+    assert loaded.nodes["S1"].parent == "root" and loaded.nodes["S1"].depth == 1 and loaded.nodes["S1a"].depth == 2
+    assert loaded.max_depth == 2
+    assert loaded.sections == ["S1", "S2"]
+    assert loaded.nodes["root"].text == tree.nodes["root"].text  # the root keeps its own summary
+    for n in loaded.nodes.values():
+        if not n.is_leaf:
+            assert len(n.children) >= 2
+    assert cache.path_for(tree.id).read_text(encoding="utf-8") == on_disk
+    # a tree that has no chain comes back exactly as saved
+    again = cache.load_tree(tree.id)
+    assert again.model_dump() == loaded.model_dump()
+
+
+def test_the_api_serves_a_chained_tree_collapsed_and_it_still_zooms(tmp_path, monkeypatch):
+    import asyncio
+
+    from httpx import ASGITransport, AsyncClient
+
+    import riemann.server as server
+    from riemann.abstraction import cache
+    from riemann.abstraction.frontier import expansion_sequence, frontier_at
+    from riemann.abstraction.model import Tree
+
+    monkeypatch.setenv("RIEMANN_DATA_DIR", str(tmp_path))
+    cache.save_tree(_chain_tree())
+
+    async def go():
+        async with AsyncClient(transport=ASGITransport(app=server.app), base_url="http://test") as c:
+            return (await c.get("/api/tree/t")).json()
+
+    body = asyncio.run(go())
+    tree = Tree.model_validate(body)
+    assert tree.nodes[tree.root].children == ["S1", "S2"]
+    seq = expansion_sequence(tree)
+    assert sorted(frontier_at(tree, seq, len(seq))) == sorted(n for n, v in tree.nodes.items() if v.is_leaf)
+
+
+def test_remove_pass_through_levels_takes_the_chain_below_the_root():
+    """The levels a lone node gets from being summarised again and again (root over one node over
+    one node) go, and the root keeps its own summary."""
+    from riemann.abstraction.build import has_pass_through_level, remove_pass_through_levels
+
+    tree = _chain_tree()
+    assert has_pass_through_level(tree)
+    remove_pass_through_levels(tree)
+    assert not has_pass_through_level(tree)
+    assert tree.nodes[tree.root].children == ["S1", "S2"]

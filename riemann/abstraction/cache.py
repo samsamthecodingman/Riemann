@@ -109,7 +109,15 @@ def load_tree(tree_id: str) -> Tree | None:
     path = _find(tree_id)
     if path is None:
         return None
-    return Tree.model_validate_json(path.read_text(encoding="utf-8"))
+    tree = Tree.model_validate_json(path.read_text(encoding="utf-8"))
+    if tree.status == "done" and tree.root in tree.nodes:
+        from riemann.abstraction import build  # lazy: build imports this module
+
+        # Trees from before single-child chains were collapsed (and backfilled copies of them in the
+        # current namespace) still have a pass-through level at the top; the file itself is left as it is.
+        if build.has_pass_through_level(tree):
+            build.remove_pass_through_levels(tree)
+    return tree
 
 
 def save_tree(tree: Tree) -> None:
