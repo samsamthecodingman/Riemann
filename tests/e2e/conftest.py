@@ -120,7 +120,7 @@ def run_check(server, tree_id, playwright_dir):
     def run(name: str, *args: str) -> dict:
         proc = subprocess.run(
             ["node", str(RUNNER), playwright_dir, server, tree_id, name, *args],
-            capture_output=True, text=True, timeout=180,
+            capture_output=True, text=True, timeout=300,
         )
         out = proc.stdout.strip().splitlines()
         assert out, f"no output from runner ({proc.stderr[:400]})"

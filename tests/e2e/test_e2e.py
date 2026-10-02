@@ -5,6 +5,7 @@ import pytest
 
 CHECKS = [
     "zoom_grows_words",
+    "zoom_goes_where_the_pointer_is",
     "pin_drift_under_2px",
     "map_toggle_and_jump",
     "columns_drag_persists",

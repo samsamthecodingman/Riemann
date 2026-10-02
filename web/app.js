@@ -39,6 +39,9 @@
     prose: new Set(), // internal nodes shown as their summary paragraph; others on the page are in skim form
     anchorNodeId: null,
     sequenceAnchor: null,
+    // Which way the dial has been turning on the current sequence: +1 (in), -1 (out), 0 (not yet).
+    // A sequence only serves one direction well (see setZ), so reversing rebuilds it.
+    seqDir: 0,
     anchorOffset: null,
     minimalChrome: false,
     eventSource: null,
@@ -433,6 +436,7 @@
   // exactly one passage instead of reshuffling the page.
   function sequenceKeepingPage(anchorId) {
     const nodes = state.tree.nodes;
+    state.seqDir = 0;
     if (!state.frontier || !state.frontier.length) {
       return window.Frontier.buildExpansionSequence(state.tree, anchorId);
     }
@@ -1682,13 +1686,29 @@
     }
     if (!state.anchorNodeId) setAnchor(findCentreNodeId());
 
+    // The sequence puts the current page first, farthest passage first, then
+    // the rest nearest first. Turning the dial the way it was built for does
+    // the right thing at the anchor (in opens the passage under the pointer
+    // first; out folds it first). Going back the other way would replay the
+    // order reversed, so a change of direction rebuilds it around the same
+    // anchor and the page as it is now, then carries on from there.
+    let target = clamped;
+    const stepsAsked =
+      window.Frontier.zToK(clamped, state.sequence.length) - window.Frontier.zToK(zFrom, state.sequence.length);
+    const dir = Math.sign(stepsAsked);
+    if (state.seqDir && dir && dir !== state.seqDir && state.sequenceAnchor && state.tree.nodes[state.sequenceAnchor]) {
+      state.sequence = sequenceKeepingPage(state.sequenceAnchor);
+      target = clamped <= 0 ? 0 : clamped >= 1 ? 1 : Math.max(0, Math.min(1, state.z + stepsAsked / Math.max(1, state.sequence.length)));
+    }
+    if (dir) state.seqDir = dir;
+
     let beforeY = forcedBeforeY;
     if (beforeY == null) {
       const anchorEl = $content.querySelector(`[data-node-id="${state.anchorNodeId}"]`);
       beforeY = anchorEl ? pinY(state.anchorNodeId, anchorEl.getBoundingClientRect(), state.anchorOffset) : null;
     }
 
-    state.z = clamped;
+    state.z = target;
     const { frontier, prose } = window.Frontier.frontierAtZ(state.tree, state.sequence, state.z);
     state.frontier = frontier;
     state.prose = prose;
@@ -2607,6 +2627,7 @@
       resetTopSpacer();
       state.sequence = seq;
       state.sequenceAnchor = N;
+      state.seqDir = 0;
       state.z = targetK(seq) / Math.max(1, seq.length);
       const r = F.frontierAtZ(tree, seq, state.z);
       state.frontier = r.frontier;
@@ -2812,6 +2833,7 @@
     const anchorId = (saved && saved.anchor_node_id && tree.nodes[saved.anchor_node_id]) ? saved.anchor_node_id : tree.root;
     state.sequence = window.Frontier.buildExpansionSequence(tree, anchorId);
     state.sequenceAnchor = anchorId;
+    state.seqDir = 0;
     state.anchorNodeId = anchorId;
     state.anchorOffset = saved ? saved.anchor_offset : null;
 
@@ -2871,6 +2893,8 @@
     debounce(() => {
       if (!state.tree || !$app.classList.contains("active")) return;
       if (Date.now() - state.lastDialChangeAt < 400) return;
+      // Mid-gesture the passage under the pointer is the anchor; the centre of the screen is not.
+      if (zHeld || zSticky || wheelBurstActive) return;
       const centreId = findCentreNodeId();
       if (centreId && centreId !== state.anchorNodeId) setAnchor(centreId);
       updateReadout();

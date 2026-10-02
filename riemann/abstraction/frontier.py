@@ -186,6 +186,13 @@ def expansion_sequence(
     plain step each (never merged), so re-anchoring keeps the page exactly as
     it is: frontier_at/prose_at(seq, len(keep_expanded)) is the current page.
     Must be closed under ancestors (any real page's applied set is).
+    They are ordered farthest from the anchor first (each only once its parent
+    is applied), so turning the dial down peels the passage under the pointer
+    first and the far ones last. Nearest-first would fold the far passages
+    before the one you are on. Turning it up again from below the page would
+    replay that order, so a reader that reverses direction rebuilds the
+    sequence (app.js setZ); going up from the page itself, the rest of the
+    sequence is anchor-first (nearest first).
     """
     anchor = anchor_id or tree.root
     keep = set(keep_expanded or ())
@@ -214,7 +221,7 @@ def expansion_sequence(
         ]
         if not avail:
             break
-        best = min(avail, key=key)
+        best = max(avail, key=key)  # farthest from the anchor first (see the docstring)
         remaining.discard(best)
         sequence.append(best)
         _apply(tree, expanded, prose, best)

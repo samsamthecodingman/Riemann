@@ -85,6 +85,106 @@ function longDoc() {
   return out;
 }
 
+
+// A synthetic tree shaped like a real assignment brief: a pass-through chain at the top
+// (root -> a1 -> a2 -> a3 -> hub), then five sections of three passages of three paragraphs.
+// Served to the reader by a route, so the chain survives whatever the server would normalise.
+function chainTreeJson(id) {
+  const nodes = {};
+  const words = (tag, n) => Array.from({ length: n }, (_, i) => `${tag}${i}`).join(" ");
+  const leafTexts = [];
+  let pos = 0;
+  const add = (nid, parent, depth, n, children, span, leaf, extra) => {
+    nodes[nid] = {
+      id: nid, depth, text: words(nid + "t", n), words: n, children, parent, is_leaf: leaf, source_span: span, cites: [],
+      importance: 0.5, atomic: false, title: leaf ? null : words(nid + "T", 4), short_title: leaf ? null : words(nid + "S", 2),
+      hook: leaf ? null : words(nid + "H", 8), key_points: leaf ? [] : [words(nid + "a", 8), words(nid + "b", 8), words(nid + "c", 8)],
+      key_fact: null, steps: [], ...(extra || {}),
+    };
+  };
+  const spans = {};
+  const secs = [];
+  for (let s = 1; s <= 5; s++) {
+    const mids = [];
+    for (let m = 1; m <= 3; m++) {
+      const leaves = [];
+      for (let l = 1; l <= 3; l++) {
+        const lid = `s${s}m${m}l${l}`;
+        const text = words(lid + "w", 60);
+        spans[lid] = [pos, pos + text.length];
+        pos += text.length + 2;
+        leafTexts.push(text);
+        leaves.push(lid);
+      }
+      mids.push({ id: `s${s}m${m}`, leaves });
+    }
+    secs.push({ id: `s${s}`, mids });
+  }
+  for (const sec of secs) {
+    for (const mid of sec.mids) {
+      for (const lid of mid.leaves) {
+        add(lid, mid.id, 6, 60, [], spans[lid], true);
+        nodes[lid].text = leafTexts[Object.keys(spans).indexOf(lid)];
+      }
+      add(mid.id, sec.id, 5, 45, mid.leaves, [spans[mid.leaves[0]][0], spans[mid.leaves[2]][1]], false);
+    }
+    add(sec.id, "hub", 4, 60, sec.mids.map((m) => m.id), [spans[sec.mids[0].leaves[0]][0], spans[sec.mids[2].leaves[2]][1]], false);
+  }
+  const end = pos;
+  add("hub", "a3", 3, 120, secs.map((x) => x.id), [0, end], false);
+  add("a3", "a2", 2, 70, ["hub"], [0, end], false);
+  add("a2", "a1", 1, 40, ["a3"], [0, end], false);
+  add("a1", "root", 0, 20, ["a2"], [0, end], false);
+  // the root is the first node: ids root -> a1 -> a2 -> a3 -> hub
+  nodes.root = { ...nodes.a1, id: "root", depth: 0, parent: null, children: ["a1"], text: words("rootT", 18) };
+  nodes.a1 = { ...nodes.a1, id: "a1", depth: 1, parent: "root", children: ["a2"] };
+  nodes.a2 = { ...nodes.a2, depth: 2, parent: "a1" };
+  nodes.a3 = { ...nodes.a3, depth: 3, parent: "a2" };
+  nodes.hub = { ...nodes.hub, depth: 4, parent: "a3" };
+  return {
+    id, title: "Chain brief", source_text: leafTexts.join("\n\n"), source_words: leafTexts.length * 60, root: "root", nodes, max_depth: 6,
+    status: "done", provisional_root: false, model: "claude-sonnet-5-5", objective: null, sections: secs.map((x) => x.id), genre: "other",
+    overview: null, stale: false,
+  };
+}
+
+// Real input only (page.mouse / page.keyboard). Samples what the reader shows as {id: text}.
+const shownNodes = (page) =>
+  page.evaluate(() => Object.fromEntries([...document.querySelectorAll("#content [data-node-id]")].map((n) => [n.dataset.nodeId, n.innerText.replace(/\s+/g, " ").trim()])));
+
+// Put node `id` (or the first rendered node inside it) in view with the wheel, pointer over it, and return its id.
+async function pointAt(page, tree, inside, wantTop) {
+  const within = (nid) => { for (let p = nid; p; p = tree.nodes[p].parent) if (p === inside) return true; return false; };
+  let lastTop = null;
+  for (let i = 0; i < 12; i++) {
+    const r = await page.evaluate((ids) => {
+      const el = [...document.querySelectorAll("#content [data-node-id]")].find((n) => ids.includes(n.dataset.nodeId));
+      if (!el) return null;
+      const b = el.getBoundingClientRect();
+      return { id: el.dataset.nodeId, top: b.top, bottom: b.bottom, left: b.left, width: b.width, vh: innerHeight };
+    }, Object.keys(tree.nodes).filter(within));
+    if (!r) throw new Error("nothing of " + inside + " is on the page");
+    const stuck = lastTop != null && Math.abs(r.top - lastTop) < 2; // the page cannot scroll further
+    lastTop = r.top;
+    const ok = stuck || (wantTop ? Math.abs(r.top - wantTop) < 40 : r.top >= 190 && r.top <= r.vh - 260);
+    if (ok) {
+      await page.mouse.move(r.left + r.width / 2, r.top + Math.min(40, (r.bottom - r.top) / 2));
+      await page.waitForTimeout(150);
+      return r.id;
+    }
+    await page.mouse.wheel(0, r.top - (wantTop || 300));
+    await page.waitForTimeout(350);
+  }
+  throw new Error("could not scroll " + inside + " into view");
+}
+
+// What a step changed: ids that appeared, went, or whose text differs.
+function diffShown(a, b) {
+  const out = [];
+  for (const id of new Set([...Object.keys(a), ...Object.keys(b)])) if (a[id] !== b[id]) out.push(id);
+  return out;
+}
+
 const DATA = process.env.RIEMANN_E2E_DATA; // the server's scratch data folder (set by conftest.py)
 
 const checks = {
@@ -831,6 +931,115 @@ const checks = {
       return { top: h.top, h: h.height };
     });
     return { ok: seen.every((o) => o <= 0) && header.h > 40, seen, header };
+  },
+
+
+  async zoom_goes_where_the_pointer_is(page) {
+    const ID = "c4a1f0e5d7b3a291";
+    const tree = chainTreeJson(ID);
+    await page.route(new RegExp(`/api/tree/${ID}(/.*)?$`), (route) => {
+      const u = route.request().url();
+      if (route.request().method() === "GET" && u.endsWith(ID)) return route.fulfill({ json: tree });
+      return route.fulfill({ json: { titles: {}, added: 0, overview: null } });
+    });
+    await openReader(page, ID);
+    const sub = (nid, root) => { for (let p = nid; p; p = tree.nodes[p].parent) if (p === root) return true; return false; };
+    const problems = [];
+    const log = [];
+    const fresh = async () => {
+      await page.evaluate(() => localStorage.clear());
+      await page.reload();
+      await page.waitForSelector("#content .node, .root-hero", { timeout: 15000 });
+      await page.waitForTimeout(500);
+      await page.mouse.move(5, 5); // off the text, so the keys act at the middle of the screen
+      const five = async () => { const n = await shownNodes(page); return ["s1", "s2", "s3", "s4", "s5"].every((x) => n[x]); };
+      // Fold to the gist, then step in until the five sections show, each still collapsed to its skim.
+      for (let attempt = 0; attempt < 3 && !(await five()); attempt++) {
+        for (let i = 0; i < 20; i++) { await page.keyboard.press("-"); await page.waitForTimeout(60); }
+        await page.waitForTimeout(300);
+        for (let i = 0; i < 6 && !(await five()); i++) { await page.keyboard.press("="); await page.waitForTimeout(350); }
+      }
+      if (!(await five())) problems.push({ label: "setup", notFive: Object.keys(await shownNodes(page)) });
+    };
+    // One gesture over the passage in `section`; dirs is one entry per step (+1 in, -1 out).
+    // P is the passage under the pointer when it starts. In: every step changes only P's own subtree for as long as P
+    // has something left to open. Out: when P is a paragraph on the page, the first step after the gesture starts or turns round folds P itself (into its parent).
+    async function gesture(label, section, dirs, how, wantTop) {
+      const centre = how === "more";
+      const first = await pointAt(page, tree, section, centre ? 330 : wantTop || null);
+      if (how === "tapz") { await page.keyboard.press("z"); await page.waitForTimeout(200); }
+      if (how === "ctrl") await page.keyboard.down("Control");
+      if (how === "zdrag") { await page.keyboard.down("z"); await page.waitForTimeout(400); }
+      let P = (await page.evaluate(() => { const n = document.querySelector("#content .node.pinned"); return n ? n.dataset.nodeId : null; })) || first;
+      if (centre) P = await page.evaluate(() => { const e = document.elementFromPoint(innerWidth / 2, innerHeight / 2); const n = e && e.closest("[data-node-id]"); return n ? n.dataset.nodeId : null; });
+      const box = await page.evaluate((id) => { const b = document.querySelector(`[data-node-id="${id}"]`).getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + Math.min(40, b.height / 2) }; }, first);
+      let dragX = box.x;
+      const steps = [];
+      let prev = 0;
+      for (let i = 0; i < dirs.length; i++) {
+        const dir = dirs[i];
+        const before = await shownNodes(page);
+        const ids = Object.keys(before);
+        const openIn = ids.some((id) => sub(id, P) && !tree.nodes[id].is_leaf);
+        if (how === "tapz") await page.mouse.wheel(0, -45 * dir);
+        else if (how === "ctrl") await page.mouse.wheel(0, -100 * dir);
+        else if (how === "equals") await page.keyboard.press(dir > 0 ? "=" : "-");
+        else if (how === "zdrag") { dragX += dir * 26; await page.mouse.move(dragX, box.y); }
+        else await page.click(dir > 0 ? "#zoom-more" : "#zoom-less");
+        await page.waitForTimeout(380);
+        const after = await shownNodes(page);
+        const changed = diffShown(before, after);
+        steps.push((dir > 0 ? "+" : "-") + (changed.length ? changed.join(",") : "none"));
+        if (dir > 0 && openIn && changed.some((id) => !sub(id, P))) problems.push({ label, step: i + 1, P, outside: changed.filter((id) => !sub(id, P)) });
+        if (dir < 0 && dir !== prev && tree.nodes[P].is_leaf && ids.includes(P) && changed.length && !changed.includes(P)) problems.push({ label, step: i + 1, P, notFirst: changed });
+        if (changed.length) prev = dir; // a step that changed nothing (a merged half step) does not start a run
+      }
+      log.push(`${label}: P=${P}  ${steps.join("  ")}`);
+      if (how === "ctrl") await page.keyboard.up("Control");
+      if (how === "zdrag") await page.keyboard.up("z");
+      if (how === "tapz") await page.keyboard.press("z");
+      await page.waitForTimeout(400);
+    }
+    const run = (n, d) => Array(n).fill(d);
+
+    // 1. From the collapsed page: open section 4.
+    await fresh();
+    await gesture("collapsed: tap-Z + wheel in at s4", "s4", run(14, 1), "tapz");
+    // 2. A mixed page (s3 open, the rest collapsed): zoom in at s4, then after scrolling at s1.
+    await fresh();
+    await gesture("setup: open s3", "s3", run(5, 1), "tapz");
+    await gesture("mixed: tap-Z + wheel in at s4", "s4", run(14, 1), "tapz");
+    await gesture("scrolled: tap-Z + wheel in at s1", "s1", run(10, 1), "tapz");
+    // 3. Out folds the passage under the pointer first; turning round in the same gesture or a new one goes back to it first.
+    await fresh();
+    await gesture("setup: open s2 and s4", "s2", run(5, 1), "tapz");
+    await gesture("out then in, one gesture, at s4", "s4", [1, 1, 1, 1, 1, -1, -1, -1, 1, 1, 1, 1, 1, 1], "tapz");
+    await gesture("out at s4", "s4", run(3, -1), "tapz");
+    await gesture("then in again at s4", "s4", run(8, 1), "tapz");
+    // 3b. The page as Sam found it: s3 open, the rest collapsed. Out first (k below the page), then back in over s4.
+    await fresh();
+    await gesture("setup: open s3", "s3", run(5, 1), "tapz");
+    await gesture("out then in, one gesture, over s4's skim", "s4", [-1, -1, -1, -1, 1, 1, 1, 1, 1, 1], "tapz");
+    await gesture("out over s4's skim (new gesture)", "s4", run(3, -1), "tapz");
+    await gesture("in over s4's skim (new gesture)", "s4", run(6, 1), "tapz");
+    // 4. The other ways in.
+    await fresh();
+    await gesture("setup: open s3", "s3", run(5, 1), "tapz");
+    await gesture("hold-Z drag in at s4", "s4", run(12, 1), "zdrag");
+    await gesture("hold-Z drag out at s4", "s4", run(4, -1), "zdrag");
+    await fresh();
+    await gesture("setup: open s3", "s3", run(5, 1), "tapz");
+    await gesture("Ctrl+wheel in at s4", "s4", run(12, 1), "ctrl");
+    await gesture("Ctrl+wheel out at s4", "s4", run(4, -1), "ctrl");
+    await fresh();
+    await gesture("setup: open s3", "s3", run(5, 1), "tapz");
+    await gesture("= key in at s4", "s4", run(12, 1), "equals");
+    await gesture("- key out at s4", "s4", run(4, -1), "equals");
+    await fresh();
+    await gesture("setup: open s3", "s3", run(5, 1), "tapz");
+    await gesture("More button (centre) at s4", "s4", run(10, 1), "more");
+    await gesture("Less button (centre) at s4", "s4", run(4, -1), "more");
+    return { ok: problems.length === 0, problems: problems.slice(0, 6), log };
   },
 
   async monkey_seed(page, errors) {

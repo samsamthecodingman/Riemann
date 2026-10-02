@@ -208,3 +208,21 @@ left alone (`web/mathtext.js`, tested in `tests/test_web_math.py`).
 `app.js` count it as exactly that many characters, whether the span holds KaTeX's markup or the LaTeX text, so offsets do
 not depend on how KaTeX lays it out and offsets saved before maths was rendered still fit. A selection that starts or ends
 inside a formula takes the whole formula. Formulas are not searched.
+
+## Zoom goes where the pointer is
+
+The passage under the pointer when a zoom gesture starts is the anchor, and the dial follows it:
+
+- **In:** each step changes only that passage's own subtree (it switches to its prose, then opens into its parts, then
+  those do) until it is all paragraphs; only then does the zoom move on to its nearest neighbours (span-midpoint
+  distance). This holds from the gist, from a mixed page, after scrolling elsewhere, and for every way of zooming.
+- **Out:** the passage under the pointer folds first (its own prose, then its parts into their parent), then its nearest
+  neighbours, and the far passages last.
+
+How the sequence gets that: a new anchor rebuilds the sequence with the page as it is first (`keep_expanded`), the kept
+tokens **farthest from the anchor first** so the last one applied is the nearest, then everything else nearest first.
+A sequence only serves one direction well (going back up it would replay the kept tokens far-first), so when the dial
+turns round, `setZ` rebuilds it around the same anchor and the page as it is now. The scroll-driven re-anchor is
+ignored while a Z, Ctrl+wheel or wheel-in-Z gesture is going: the anchor is the passage under the pointer, never the
+screen centre. Trees read from the cache have any single-child chain collapsed (`cache.load_tree`), so an older tree
+zooms like a current one; the reader still copes with a chain.

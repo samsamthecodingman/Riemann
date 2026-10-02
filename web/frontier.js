@@ -175,6 +175,7 @@ function buildExpansionSequence(tree, anchorNodeId, keepExpanded) {
     return ka === kb ? 0 : ka < kb ? -1 : 1;
   };
   const best = (list) => list.reduce((m, t) => (compare(t, m) < 0 ? t : m), list[0]);
+  const worst = (list) => list.reduce((m, t) => (compare(t, m) > 0 ? t : m), list[0]);
 
   const st = { expanded: new Set(), prose: new Set() };
   const sequence = [];
@@ -188,7 +189,7 @@ function buildExpansionSequence(tree, anchorNodeId, keepExpanded) {
     const front = new Set(internalFrontier());
     const avail = [...remaining].filter((t) => front.has(tokenNode(t)) && !(t.charAt(0) === PROSE && tokenNode(t) === tree.root));
     if (!avail.length) break;
-    const pick = best(avail);
+    const pick = worst(avail); // farthest from the anchor first (see the Python docstring)
     remaining.delete(pick);
     sequence.push(pick);
     applyToken(tree, st, pick);
