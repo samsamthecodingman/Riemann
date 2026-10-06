@@ -1,7 +1,7 @@
-"""Multi-account email connectors: config, shared interface, router, provider stubs.
+"""Multi-account email connectors: config, shared interface, router, providers.
 
-Skeleton only: the connectors return placeholder data and never touch the network
-or resolve credentials.
+Gmail is a real read-only connector (see gmail.py, authorize.py); IMAP is still a stub
+that returns placeholder data.
 """
 
 from riemann.email.base import EmailConnector, Message, MessageSummary

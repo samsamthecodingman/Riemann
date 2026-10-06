@@ -6,7 +6,10 @@ from pydantic import ValidationError
 
 from riemann.email import ConnectorRouter, EmailConnector, Message, MessageSummary, load_config
 from riemann.email.config import EmailConfig
-from riemann.email.stubs import GmailConnector, ImapConnector
+from riemann.email.gmail import GmailConnector
+from riemann.email.stubs import ImapConnector, StubGmailConnector
+
+STUB_PROVIDERS = {"gmail": StubGmailConnector, "imap": ImapConnector}
 
 ACCOUNTS = [
     {"id": "g1", "provider": "gmail", "label": "Gmail One", "credential_ref": "env:G1"},
@@ -15,8 +18,8 @@ ACCOUNTS = [
 ]
 
 
-def router(accounts=ACCOUNTS) -> ConnectorRouter:
-    return ConnectorRouter(EmailConfig.model_validate({"accounts": accounts}))
+def router(accounts=ACCOUNTS, providers=None) -> ConnectorRouter:
+    return ConnectorRouter(EmailConfig.model_validate({"accounts": accounts}), providers)
 
 
 def test_config_valid_from_file_and_env_override(tmp_path, monkeypatch):
@@ -54,8 +57,15 @@ def test_router_one_connector_per_account_with_types():
     assert r.get("i1").label == "Imap One"
 
 
+def test_router_construction_is_lazy_and_touches_no_files():
+    # credential_ref points nowhere; building the router must not resolve or read it.
+    r = router([{**ACCOUNTS[0], "credential_ref": "file:/nonexistent/token.json"}])
+    assert r.get("g1")._service is None
+
+
 async def test_routing_returns_tagged_data():
-    r = router()
+    # Stub providers keep this test off the network.
+    r = router(providers=STUB_PROVIDERS)
     for acct in ("g1", "i1", "g2"):
         msgs = await r.list_messages(acct, limit=3)
         assert len(msgs) == 3
@@ -66,7 +76,7 @@ async def test_routing_returns_tagged_data():
 
 
 async def test_unknown_account_errors():
-    r = router()
+    r = router(providers=STUB_PROVIDERS)
     with pytest.raises(KeyError, match="unknown email account 'nope'"):
         r.get("nope")
     with pytest.raises(KeyError):

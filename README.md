@@ -172,6 +172,27 @@ RIEMANN_E2E=1 uv run pytest -q tests/e2e                              # about tw
 
 They are skipped unless `RIEMANN_E2E=1` is set, and skipped with a message if Node, the `playwright` package or a Chromium build is missing. The package is found in `$RIEMANN_PLAYWRIGHT`, a global npm install, `./node_modules`, or an `npx playwright` cache (`~/.npm/_npx/*/node_modules/playwright`); if it lives somewhere else, point `RIEMANN_PLAYWRIGHT` at its folder.
 
+## Email accounts
+
+Accounts are listed in `config/email_accounts.json` (gitignored; copy `config/email_accounts.example.json`, or point `RIEMANN_EMAIL_CONFIG` at another file). Each account has an `id` slug, a `provider` (`gmail` or `imap`), a `label` (use the email address for Gmail so Google pre-selects it), and a `credential_ref` such as `file:~/.config/riemann/creds/personal-gmail.json`. Only `file:` refs are supported so far. The Gmail connector is read-only (`gmail.readonly` scope); IMAP is still a placeholder.
+
+**One-time Google Cloud setup**
+
+1. In the [Google Cloud console](https://console.cloud.google.com/), create a project.
+2. Enable the Gmail API for it (APIs & Services > Library).
+3. Configure the OAuth consent screen: user type External, and add each Gmail address you will connect as a test user.
+4. Create credentials > OAuth client ID > application type Desktop app.
+5. Download the client JSON to `~/.config/riemann/creds/google_client_secret.json` (or set `RIEMANN_GOOGLE_CLIENT_SECRET` to another path).
+
+**Authorize each account** (opens a browser; the token is saved to the account's `credential_ref` path, mode 0600):
+
+```bash
+uv run python -m riemann.email.authorize personal-gmail
+uv run python -m riemann.email.authorize personal-gmail --config path/to/accounts.json
+```
+
+While the consent screen is in Testing, Google expires refresh tokens after 7 days; re-run the command when a connector says its token is unusable.
+
 ## How it works
 
 ```

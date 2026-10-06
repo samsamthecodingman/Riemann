@@ -6,15 +6,18 @@ from pathlib import Path
 
 from riemann.email.base import EmailConnector, Message, MessageSummary
 from riemann.email.config import AccountConfig, EmailConfig, load_config
-from riemann.email.stubs import GmailConnector, ImapConnector
+from riemann.email.gmail import GmailConnector
+from riemann.email.stubs import ImapConnector
 
 PROVIDERS: dict[str, type] = {"gmail": GmailConnector, "imap": ImapConnector}
 
 
 class ConnectorRouter:
-    def __init__(self, config: EmailConfig) -> None:
+    def __init__(self, config: EmailConfig, providers: dict[str, type] | None = None) -> None:
+        # Construction is lazy: connectors must not touch the network or credential files here.
+        registry = providers or PROVIDERS
         self._accounts = {a.id: a for a in config.accounts}
-        self._connectors: dict[str, EmailConnector] = {a.id: PROVIDERS[a.provider](a) for a in config.accounts}
+        self._connectors: dict[str, EmailConnector] = {a.id: registry[a.provider](a) for a in config.accounts}
 
     @classmethod
     def from_file(cls, path: Path | str | None = None) -> ConnectorRouter:

@@ -48,7 +48,7 @@ class _StubConnector:
         return self._message(int(num))
 
 
-class GmailConnector(_StubConnector):
+class StubGmailConnector(_StubConnector):
     provider = "gmail"
 
 
