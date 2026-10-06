@@ -1,0 +1,16 @@
+{
+  "accounts": [
+    {
+      "id": "personal-gmail",
+      "provider": "gmail",
+      "label": "Personal Gmail",
+      "credential_ref": "env:RIEMANN_GMAIL_PERSONAL"
+    },
+    {
+      "id": "work-imap",
+      "provider": "imap",
+      "label": "Work IMAP",
+      "credential_ref": "file:~/.config/riemann/creds/work.json"
+    }
+  ]
+}
