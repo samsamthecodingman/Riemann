@@ -934,6 +934,10 @@ const checks = {
   },
 
 
+  // Zoom is local to a section (docs/v2-macaron-spec.md, "Zoom is local to a section"). On a mixed page (s3 open, the
+  // rest collapsed), every pointer input over section 4 changes only section 4: every step shows a change there, all
+  // the way to its paragraphs (then nothing moves anywhere), and back down to its skim (then nothing moves). The
+  // Less/More buttons, Home/End and a zoom over the gist stay global.
   async zoom_goes_where_the_pointer_is(page) {
     const ID = "c4a1f0e5d7b3a291";
     const tree = chainTreeJson(ID);
@@ -944,15 +948,16 @@ const checks = {
     });
     await openReader(page, ID);
     const sub = (nid, root) => { for (let p = nid; p; p = tree.nodes[p].parent) if (p === root) return true; return false; };
+    const leafCount = Object.values(tree.nodes).filter((n) => n.is_leaf).length;
     const problems = [];
     const log = [];
+    const five = async () => { const n = await shownNodes(page); return ["s1", "s2", "s3", "s4", "s5"].every((x) => n[x]); };
     const fresh = async () => {
       await page.evaluate(() => localStorage.clear());
       await page.reload();
       await page.waitForSelector("#content .node, .root-hero", { timeout: 15000 });
       await page.waitForTimeout(500);
-      await page.mouse.move(5, 5); // off the text, so the keys act at the middle of the screen
-      const five = async () => { const n = await shownNodes(page); return ["s1", "s2", "s3", "s4", "s5"].every((x) => n[x]); };
+      await page.mouse.move(5, 5); // off the text: the keys act on the whole document
       // Fold to the gist, then step in until the five sections show, each still collapsed to its skim.
       for (let attempt = 0; attempt < 3 && !(await five()); attempt++) {
         for (let i = 0; i < 20; i++) { await page.keyboard.press("-"); await page.waitForTimeout(60); }
@@ -961,85 +966,147 @@ const checks = {
       }
       if (!(await five())) problems.push({ label: "setup", notFive: Object.keys(await shownNodes(page)) });
     };
-    // One gesture over the passage in `section`; dirs is one entry per step (+1 in, -1 out).
-    // P is the passage under the pointer when it starts. In: every step changes only P's own subtree for as long as P
-    // has something left to open. Out: when P is a paragraph on the page, the first step after the gesture starts or turns round folds P itself (into its parent).
-    async function gesture(label, section, dirs, how, wantTop) {
-      const centre = how === "more";
-      const first = await pointAt(page, tree, section, centre ? 330 : wantTop || null);
-      if (how === "tapz") { await page.keyboard.press("z"); await page.waitForTimeout(200); }
+    const pinTop = () => page.evaluate(() => { const n = document.querySelector("#content .node.pinned"); return n ? n.getBoundingClientRect().top : null; });
+    const endSignal = () => page.evaluate(() => !!document.querySelector("#content .node.zoom-end"));
+    const skimShown = (section) => page.evaluate((s) => !!document.querySelector(`#content [data-node-id="${s}"] .skim-points`), section);
+    const fullyOpen = (ids, section) => !ids.some((id) => sub(id, section) && !tree.nodes[id].is_leaf);
+    const outside = (snap, section) => Object.fromEntries(Object.entries(snap).filter(([id]) => !sub(id, section)));
+
+    // One gesture of `dirs` steps (+1 in, -1 out) with the pointer over `section`, by one real input. `how`: tapz (tap Z, then
+    // the wheel), swipe (tap Z, then a horizontal swipe), zdrag (hold Z and move), ctrl (Ctrl+wheel) or equals (= and -).
+    async function scoped(label, section, dirs, how) {
+      const first = await pointAt(page, tree, section, null);
+      if (how === "tapz" || how === "swipe") { await page.keyboard.press("z"); await page.waitForTimeout(200); }
       if (how === "ctrl") await page.keyboard.down("Control");
       if (how === "zdrag") { await page.keyboard.down("z"); await page.waitForTimeout(400); }
-      let P = (await page.evaluate(() => { const n = document.querySelector("#content .node.pinned"); return n ? n.dataset.nodeId : null; })) || first;
-      if (centre) P = await page.evaluate(() => { const e = document.elementFromPoint(innerWidth / 2, innerHeight / 2); const n = e && e.closest("[data-node-id]"); return n ? n.dataset.nodeId : null; });
       const box = await page.evaluate((id) => { const b = document.querySelector(`[data-node-id="${id}"]`).getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + Math.min(40, b.height / 2) }; }, first);
       let dragX = box.x;
+      const start = await shownNodes(page);
       const steps = [];
-      let prev = 0;
+      let sawEnd = false;
+      let nudged = 0;
+      let endSteps = 0;
       for (let i = 0; i < dirs.length; i++) {
         const dir = dirs[i];
         const before = await shownNodes(page);
         const ids = Object.keys(before);
-        const openIn = ids.some((id) => sub(id, P) && !tree.nodes[id].is_leaf);
+        const atEnd = dir > 0 ? fullyOpen(ids, section) : (ids.filter((id) => sub(id, section)).join() === section && (await skimShown(section)));
+        const pin0 = await pinTop();
         if (how === "tapz") await page.mouse.wheel(0, -45 * dir);
+        else if (how === "swipe") await page.mouse.wheel(45 * dir, 0);
         else if (how === "ctrl") await page.mouse.wheel(0, -100 * dir);
         else if (how === "equals") await page.keyboard.press(dir > 0 ? "=" : "-");
-        else if (how === "zdrag") { dragX += dir * 26; await page.mouse.move(dragX, box.y); }
-        else await page.click(dir > 0 ? "#zoom-more" : "#zoom-less");
-        await page.waitForTimeout(380);
+        else { dragX += dir * 26; await page.mouse.move(dragX, box.y); }
+        await page.waitForTimeout(80);
+        const signalled = await endSignal();
+        await page.waitForTimeout(300);
         const after = await shownNodes(page);
         const changed = diffShown(before, after);
-        steps.push((dir > 0 ? "+" : "-") + (changed.length ? changed.join(",") : "none"));
-        if (dir > 0 && openIn && changed.some((id) => !sub(id, P))) problems.push({ label, step: i + 1, P, outside: changed.filter((id) => !sub(id, P)) });
-        if (dir < 0 && dir !== prev && tree.nodes[P].is_leaf && ids.includes(P) && changed.length && !changed.includes(P)) problems.push({ label, step: i + 1, P, notFirst: changed });
-        if (changed.length) prev = dir; // a step that changed nothing (a merged half step) does not start a run
+        const pin1 = await pinTop();
+        steps.push((dir > 0 ? "+" : "-") + (changed.length ? changed.length : "0") + (atEnd ? "!" : ""));
+        const stray = changed.filter((id) => !sub(id, section));
+        if (stray.length) problems.push({ label, step: i + 1, dir, outside: stray });
+        if (atEnd) {
+          sawEnd = true;
+          endSteps++;
+          if (changed.length) problems.push({ label, step: i + 1, dir, movedAtEnd: changed });
+          if (signalled) nudged++;
+        } else if (!changed.length) problems.push({ label, step: i + 1, dir, deadStep: true });
+        if (pin0 != null && pin1 != null && Math.abs(pin1 - pin0) >= 2) problems.push({ label, step: i + 1, dir, pinDrift: pin1 - pin0 });
       }
-      log.push(`${label}: P=${P}  ${steps.join("  ")}`);
+      const last = await shownNodes(page);
+      if (JSON.stringify(outside(last, section)) !== JSON.stringify(outside(start, section))) {
+        problems.push({ label, outsideChanged: diffShown(outside(start, section), outside(last, section)) });
+      }
+      const ends = dirs[dirs.length - 1] > 0 ? fullyOpen(Object.keys(last), section) : Object.keys(last).filter((id) => sub(id, section)).join() === section;
+      if (!ends) problems.push({ label, neverReachedEnd: Object.keys(last).filter((id) => sub(id, section)).length });
+      if (endSteps && !nudged) problems.push({ label, noEndSignal: endSteps });
+      log.push(`${label}: ${steps.join(" ")}`);
       if (how === "ctrl") await page.keyboard.up("Control");
       if (how === "zdrag") await page.keyboard.up("z");
-      if (how === "tapz") await page.keyboard.press("z");
+      if (how === "tapz" || how === "swipe") await page.keyboard.press("z");
       await page.waitForTimeout(400);
     }
     const run = (n, d) => Array(n).fill(d);
+    // Section 3 open, the rest collapsed.
+    const openThree = async () => {
+      await fresh();
+      await scoped("setup: open s3", "s3", run(14, 1), "tapz");
+    };
 
-    // 1. From the collapsed page: open section 4.
-    await fresh();
-    await gesture("collapsed: tap-Z + wheel in at s4", "s4", run(14, 1), "tapz");
-    // 2. A mixed page (s3 open, the rest collapsed): zoom in at s4, then after scrolling at s1.
-    await fresh();
-    await gesture("setup: open s3", "s3", run(5, 1), "tapz");
-    await gesture("mixed: tap-Z + wheel in at s4", "s4", run(14, 1), "tapz");
-    await gesture("scrolled: tap-Z + wheel in at s1", "s1", run(10, 1), "tapz");
-    // 3. Out folds the passage under the pointer first; turning round in the same gesture or a new one goes back to it first.
-    await fresh();
-    await gesture("setup: open s2 and s4", "s2", run(5, 1), "tapz");
-    await gesture("out then in, one gesture, at s4", "s4", [1, 1, 1, 1, 1, -1, -1, -1, 1, 1, 1, 1, 1, 1], "tapz");
-    await gesture("out at s4", "s4", run(3, -1), "tapz");
-    await gesture("then in again at s4", "s4", run(8, 1), "tapz");
-    // 3b. The page as Sam found it: s3 open, the rest collapsed. Out first (k below the page), then back in over s4.
-    await fresh();
-    await gesture("setup: open s3", "s3", run(5, 1), "tapz");
-    await gesture("out then in, one gesture, over s4's skim", "s4", [-1, -1, -1, -1, 1, 1, 1, 1, 1, 1], "tapz");
-    await gesture("out over s4's skim (new gesture)", "s4", run(3, -1), "tapz");
-    await gesture("in over s4's skim (new gesture)", "s4", run(6, 1), "tapz");
-    // 4. The other ways in.
-    await fresh();
-    await gesture("setup: open s3", "s3", run(5, 1), "tapz");
-    await gesture("hold-Z drag in at s4", "s4", run(12, 1), "zdrag");
-    await gesture("hold-Z drag out at s4", "s4", run(4, -1), "zdrag");
-    await fresh();
-    await gesture("setup: open s3", "s3", run(5, 1), "tapz");
-    await gesture("Ctrl+wheel in at s4", "s4", run(12, 1), "ctrl");
-    await gesture("Ctrl+wheel out at s4", "s4", run(4, -1), "ctrl");
-    await fresh();
-    await gesture("setup: open s3", "s3", run(5, 1), "tapz");
-    await gesture("= key in at s4", "s4", run(12, 1), "equals");
-    await gesture("- key out at s4", "s4", run(4, -1), "equals");
-    await fresh();
-    await gesture("setup: open s3", "s3", run(5, 1), "tapz");
-    await gesture("More button (centre) at s4", "s4", run(10, 1), "more");
-    await gesture("Less button (centre) at s4", "s4", run(4, -1), "more");
-    return { ok: problems.length === 0, problems: problems.slice(0, 6), log };
+    const inputs = [["tapz", "tap-Z + wheel"], ["swipe", "tap-Z + swipe"], ["zdrag", "hold-Z drag"], ["ctrl", "Ctrl+wheel"], ["equals", "= and -"]];
+    for (const [how, name] of inputs) {
+      await openThree();
+      await scoped(`${name}: in over s4`, "s4", run(16, 1), how);
+      await scoped(`${name}: out over s4`, "s4", run(16, -1), how);
+    }
+    // Out first on the collapsed section (the floor: nothing to do), then in, then a turn-round in one gesture.
+    await openThree();
+    await scoped("tap-Z: out over collapsed s4", "s4", run(3, -1), "tapz");
+    await scoped("tap-Z: in over s4", "s4", run(16, 1), "tapz");
+    await scoped("tap-Z: in again over s2", "s2", run(16, 1), "tapz");
+    await scoped("tap-Z: out over s2 then s4", "s4", run(16, -1), "tapz");
+    {
+      // s3 untouched all through
+      const n = await shownNodes(page);
+      const s3 = Object.keys(n).filter((id) => sub(id, "s3"));
+      if (!s3.length || s3.some((id) => tree.nodes[id].is_leaf === false)) problems.push({ label: "s3 not as left", s3 });
+    }
+
+    // Global zooms still step the whole document: from a mixed page, More reaches the full text and Less the gist.
+    await openThree();
+    await page.mouse.move(5, 5);
+    let prevWords = await words(page);
+    let stuck = 0;
+    const touched = new Set();
+    for (let i = 0; i < 40 && stuck < 2; i++) {
+      const before = await shownNodes(page);
+      await page.click("#zoom-more");
+      await page.waitForTimeout(380);
+      const after = await shownNodes(page);
+      const ch = diffShown(before, after);
+      ch.forEach((id) => { const s = ["s1", "s2", "s3", "s4", "s5"].find((x) => sub(id, x)); if (s) touched.add(s); });
+      stuck = ch.length ? 0 : stuck + 1;
+    }
+    {
+      const n = await shownNodes(page);
+      const leaves = Object.keys(n).filter((id) => tree.nodes[id].is_leaf).length;
+      if (leaves !== leafCount) problems.push({ label: "More button never reached the full text", leaves, leafCount });
+      if (touched.size < 3) problems.push({ label: "More button stayed in one section", touched: [...touched] });
+    }
+    for (let i = 0; i < 40; i++) { await page.click("#zoom-less"); await page.waitForTimeout(150); }
+    await page.waitForTimeout(400);
+    {
+      const n = await shownNodes(page);
+      if (!(Object.keys(n).length <= 1)) problems.push({ label: "Less button never reached the gist", shown: Object.keys(n).length });
+    }
+    // Home and End on the dial, from a page a section-scoped zoom just left mixed.
+    await openThree();
+    await scoped("tap-Z: out over s4 before Home/End", "s4", run(3, -1), "tapz");
+    await page.focus("#dial");
+    await page.keyboard.press("End");
+    await page.waitForTimeout(500);
+    {
+      const n = await shownNodes(page);
+      const leaves = Object.keys(n).filter((id) => tree.nodes[id].is_leaf).length;
+      if (leaves !== leafCount) problems.push({ label: "End did not show the full text", leaves, leafCount });
+    }
+    await page.keyboard.press("Home");
+    await page.waitForTimeout(500);
+    {
+      const n = await shownNodes(page);
+      if (Object.keys(n).length > 1) problems.push({ label: "Home did not go to the gist", shown: Object.keys(n).length });
+    }
+    // A zoom with the pointer over the gist is global: it opens the page into its sections.
+    await page.mouse.move(640, 300);
+    let gistOpened = false;
+    for (let i = 0; i < 12 && !gistOpened; i++) {
+      await page.keyboard.press("=");
+      await page.waitForTimeout(380);
+      gistOpened = await five();
+    }
+    if (!gistOpened) problems.push({ label: "zoom over the gist did not open the sections" });
+    return { ok: problems.length === 0, problems: problems.slice(0, 8), log };
   },
 
   async monkey_seed(page, errors) {

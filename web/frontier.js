@@ -71,18 +71,28 @@ function skimWordsOf(node) {
   return countWords(node.title || firstClause(node.text)) + points.reduce((sum, p) => sum + countWords(p), 0);
 }
 
+/** True when node `id` is `scopeId` or lies in its subtree. */
+function underScope(tree, id, scopeId) {
+  while (id != null) {
+    if (id === scopeId) return true;
+    id = tree.nodes[id].parent;
+  }
+  return false;
+}
+
 /**
  * Words on the page for a frontier and prose set, as app.js renders it: a
  * lone root is its hook line; a skim node is its title plus key points;
  * anything else is the node's own text. Mirrors visible_words in frontier.py.
  */
-function visibleWords(tree, frontier, prose) {
-  if (frontier.length === 1 && frontier[0] === tree.root) {
+function visibleWords(tree, frontier, prose, scopeId) {
+  if (scopeId == null && frontier.length === 1 && frontier[0] === tree.root) {
     const root = tree.nodes[tree.root];
     return countWords(root.hook || root.text);
   }
   let total = 0;
   for (const id of frontier) {
+    if (scopeId != null && !underScope(tree, id, scopeId)) continue;
     const node = tree.nodes[id];
     total += isSkimNode(tree, node, prose) ? skimWordsOf(node) : node.words;
   }
@@ -148,9 +158,15 @@ function samePage(tree, a, b) {
  * @param {Set<string>} [keepExpanded] - tokens applied right now (expanded
  *   ids and "~id" prose tokens). They go first, one plain step each, so
  *   re-anchoring keeps the page exactly as it is.
+ * @param {string|null} [scopeId] - confine the zoom to this node's subtree (a
+ *   top-level section): the kept tokens outside it first, then the kept tokens
+ *   inside it (farthest from the anchor first), then only in-scope tokens, with
+ *   the step-growth rule measured on the scope's own words. The caller keeps k
+ *   between the number of kept tokens outside the scope and the length.
  * @returns {string[]} ordered list of tokens.
  */
-function buildExpansionSequence(tree, anchorNodeId, keepExpanded) {
+function buildExpansionSequence(tree, anchorNodeId, keepExpanded, scopeId) {
+  if (scopeId === undefined) scopeId = null;
   const nodes = tree.nodes;
   const anchor = nodes[anchorNodeId] || nodes[tree.root];
   const anchorMid = (anchor.source_span[0] + anchor.source_span[1]) / 2;
@@ -181,18 +197,30 @@ function buildExpansionSequence(tree, anchorNodeId, keepExpanded) {
   const sequence = [];
   const internalFrontier = () =>
     frontierOfExpanded(tree, st.expanded).filter((id) => !nodes[id].is_leaf);
-  const words = () => visibleWords(tree, frontierOfExpanded(tree, st.expanded), st.prose);
+  const words = () => visibleWords(tree, frontierOfExpanded(tree, st.expanded), st.prose, scopeId);
+  const scopedFrontier = () =>
+    scopeId == null ? internalFrontier() : internalFrontier().filter((id) => underScope(tree, id, scopeId));
 
-  // 1. The page as it is now, one plain step per applied token.
-  const remaining = new Set(keepExpanded || []);
-  while (remaining.size) {
-    const front = new Set(internalFrontier());
-    const avail = [...remaining].filter((t) => front.has(tokenNode(t)) && !(t.charAt(0) === PROSE && tokenNode(t) === tree.root));
-    if (!avail.length) break;
-    const pick = worst(avail); // farthest from the anchor first (see the Python docstring)
-    remaining.delete(pick);
-    sequence.push(pick);
-    applyToken(tree, st, pick);
+  // 1. The page as it is now, one plain step per applied token. With a scope,
+  // the tokens outside it go first and the ones inside it after.
+  const keep = [...(keepExpanded || [])];
+  const passes =
+    scopeId == null
+      ? [new Set(keep)]
+      : [
+          new Set(keep.filter((t) => !underScope(tree, tokenNode(t), scopeId))),
+          new Set(keep.filter((t) => underScope(tree, tokenNode(t), scopeId))),
+        ];
+  for (const remaining of passes) {
+    while (remaining.size) {
+      const front = new Set(internalFrontier());
+      const avail = [...remaining].filter((t) => front.has(tokenNode(t)) && !(t.charAt(0) === PROSE && tokenNode(t) === tree.root));
+      if (!avail.length) break;
+      const pick = worst(avail); // farthest from the anchor first (see the Python docstring)
+      remaining.delete(pick);
+      sequence.push(pick);
+      applyToken(tree, st, pick);
+    }
   }
 
   // 2. Everything else, merging steps that add too little.
@@ -200,7 +228,7 @@ function buildExpansionSequence(tree, anchorNodeId, keepExpanded) {
   let v0 = words();
   let pending = [];
   for (;;) {
-    let cands = internalFrontier().map((id) => (id === tree.root || st.prose.has(id) ? id : PROSE + id));
+    let cands = scopedFrontier().map((id) => (id === tree.root || st.prose.has(id) ? id : PROSE + id));
     if (pending.length) {
       const allowed = cands.filter((t) => {
         const direct = cloneState(committed);
@@ -348,6 +376,7 @@ window.Frontier = {
   proseAtK,
   kToReveal,
   visibleWords,
+  underScope,
   countWords,
   firstClause,
   findFrontierNodeAtOffset,

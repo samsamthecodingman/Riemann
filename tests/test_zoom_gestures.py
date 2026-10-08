@@ -1,4 +1,9 @@
-"""Zoom goes where the pointer is (docs/v2-macaron-spec.md, "zoom at the pointer").
+"""Zoom goes where the pointer is (docs/v2-macaron-spec.md, "Zoom is local to a section").
+
+Two layers. The first half is the *unscoped* order (a global zoom, and the order a scoped zoom
+is built from): `Reader` below is the page state machine of web/app.js in miniature. The second
+half (from "Scoped zoom") is the rule Sam asked for: a pointer zoom is confined to the top-level
+section under the pointer, and never changes anything outside it.
 
 `Reader` below is the page state machine of web/app.js in miniature: the page, the
 dial position k, the sequence and the passage it was built around, and the rule in
@@ -217,28 +222,6 @@ def test_the_page_as_sam_found_it_in_then_out_then_in_over_another_section():
     assert all(_in_subtree(tree, n, "s4") for c in first_in for n in c), first_in
 
 
-def test_zoom_in_from_a_mixed_page_finishes_the_passage_before_its_neighbours():
-    tree = _brief_tree()
-    reader = Reader(tree)
-    _gist_with_sections(reader)
-    _open_sections(reader, "s3", "s2")
-    reader.begin("s4")
-    seen_outside = False
-    for _ in range(8):
-        before = reader.shown()
-        reader.step(1)
-        changed = _changed(before, reader.shown())
-        inside = [n for n in changed if _in_subtree(tree, n, "s4")]
-        outside = [n for n in changed if not _in_subtree(tree, n, "s4")]
-        s4_open = any(_in_subtree(tree, n, "s4") and not tree.nodes[n].is_leaf for n in before)
-        if s4_open:
-            assert not outside and inside, (changed, s4_open)
-        seen_outside = seen_outside or bool(outside)
-    # ... and once section 4 is all paragraphs, the next steps go to its neighbours
-    assert not any(not tree.nodes[n].is_leaf for n in reader.frontier() if _in_subtree(tree, n, "s4"))
-    assert seen_outside
-
-
 def test_the_kept_page_is_peeled_nearest_the_pointer_first():
     """Out from a page with two sections open, at a paragraph of the second: its own
     paragraphs fold before anything of the first section."""
@@ -253,3 +236,149 @@ def test_the_kept_page_is_peeled_nearest_the_pointer_first():
         reader.step(-1)
         changed = _changed(before, reader.shown())
         assert changed and all(_in_subtree(tree, n, "s4") for n in changed), changed
+
+
+# ---------------------------------------------------------------------------------------------
+# Scoped zoom: a pointer zoom only ever changes the top-level section under the pointer
+# ---------------------------------------------------------------------------------------------
+
+def _sections_of(tree: Tree) -> list[str]:
+    cur = tree.root
+    while len(tree.nodes[cur].children) == 1:
+        cur = tree.nodes[cur].children[0]
+    return list(tree.nodes[cur].children)
+
+
+def _scope_of(tree: Tree, nid: str, sections: list[str]):
+    secs = set(sections)
+    while nid is not None:
+        if nid in secs:
+            return nid
+        nid = tree.nodes[nid].parent
+    return None
+
+
+def _shown(tree: Tree, frontier, prose) -> dict:
+    """What the reader can see: which passages are on the page, and whether a skimmable
+    one is shown as its summary rather than its key points."""
+    out = {}
+    for n in frontier:
+        node = tree.nodes[n]
+        skimmable = not node.is_leaf and n != tree.root and (node.key_points or node.hook)
+        out[n] = bool(skimmable and n in prose)
+    return out
+
+
+def _page_after(tree, seq, k):
+    fr = frontier_at(tree, seq, k)
+    return _shown(tree, fr, prose_at(seq, k))
+
+
+def _scoped_build(tree, shown: dict, anchor, scope):
+    """What app.js does when a pointer gesture starts: rebuild around the page as it is,
+    confined to `scope`. Returns (sequence, floor) with k == len(keep) the current page."""
+    prose = {n for n, p in shown.items() if p}
+    keep = _keep_for(tree, list(shown), prose)
+    seq = expansion_sequence(tree, anchor, keep_expanded=keep, scope_id=scope)
+    floor = sum(1 for t in keep if not _in_subtree(tree, t.lstrip("~"), scope))
+    assert len(keep) <= len(seq)
+    assert _page_after(tree, seq, len(keep)) == shown, "re-anchoring must not change the page"
+    return seq, floor, len(keep)
+
+
+def _random_page(tree, rng):
+    seq = expansion_sequence(tree, rng.choice(sorted(tree.nodes)))
+    k = rng.randint(0, len(seq))
+    return _page_after(tree, seq, k)
+
+
+def _check_scoped_walk(tree, shown, anchor, scope, what):
+    """From this page, walk the scoped sequence in to its end and back out to its floor."""
+    seq, floor, k0 = _scoped_build(tree, shown, anchor, scope)
+    outside = {n: v for n, v in shown.items() if not _in_subtree(tree, n, scope)}
+
+    def inside_of(page):
+        return {n: v for n, v in page.items() if _in_subtree(tree, n, scope)}
+
+    def check_step(k_from, k_to):
+        a, b = _page_after(tree, seq, k_from), _page_after(tree, seq, k_to)
+        assert {n: v for n, v in b.items() if not _in_subtree(tree, n, scope)} == outside, (what, k_from, k_to, "outside changed")
+        assert inside_of(a) != inside_of(b), (what, k_from, k_to, "dead step")
+
+    for k in range(k0, len(seq)):
+        check_step(k, k + 1)
+    # the scope is fully open at the end: every leaf of the section is showing
+    end = _page_after(tree, seq, len(seq))
+    assert all(tree.nodes[n].is_leaf for n in end if _in_subtree(tree, n, scope)), (what, "scope not fully open")
+    for k in range(k0, floor, -1):
+        check_step(k, k - 1)
+    # the floor: the section is as compact as it gets (skim, not summary), and nothing outside moved
+    low = _page_after(tree, seq, floor)
+    assert scope in low and not low[scope], (what, "floor is not the section's skim form")
+    assert {n: v for n, v in low.items() if not _in_subtree(tree, n, scope)} == outside
+    return seq, floor, k0
+
+
+@pytest.mark.parametrize("seed", SEEDS[:10])
+@pytest.mark.parametrize("kind", KINDS)
+def test_scoped_zoom_only_changes_the_section_and_every_step_shows_it(seed, kind):
+    tree = make_tree(seed, kind)
+    sections = _sections_of(tree)
+    if not sections:
+        pytest.skip("a single passage has no sections")
+    rng = random.Random(f"scoped:{seed}:{kind}")
+    checked = 0
+    for g in range(25):
+        shown = _random_page(tree, rng)
+        anchor = rng.choice(sorted(shown))
+        scope = _scope_of(tree, anchor, sections)
+        if scope is None:
+            continue
+        seq, floor, k0 = _check_scoped_walk(tree, shown, anchor, scope, (seed, kind, g, anchor, scope))
+        # stop part-way, then start a new gesture there (what a change of direction does)
+        k = rng.randint(floor, len(seq))
+        mid = _page_after(tree, seq, k)
+        anchor2 = rng.choice([n for n in mid if _in_subtree(tree, n, scope)])
+        _check_scoped_walk(tree, mid, anchor2, scope, (seed, kind, g, "mid", k, anchor2, scope))
+        checked += 1
+    assert checked, "no gesture landed in a section"
+
+
+def test_scoped_zoom_on_the_brief_leaves_the_open_section_alone():
+    """Section 3 open, section 4 collapsed. Zoom in over section 4: only section 4 changes, all
+    the way to its paragraphs; zoom out: only section 4, down to its skim; section 3 never moves."""
+    tree = _brief_tree()
+    reader = Reader(tree)
+    _gist_with_sections(reader)
+    _open_sections(reader, "s3")
+    shown = reader.shown()
+    s3_before = {n: v for n, v in shown.items() if _in_subtree(tree, n, "s3")}
+    assert s3_before and "s4" in shown
+    anchor = "s4"
+    seq, floor, k0 = _check_scoped_walk(tree, shown, anchor, "s4", "brief")
+    assert len(seq) - k0 >= 3, "section 4 has real depth to open"
+    assert k0 == floor, "section 4 starts at its floor: it is collapsed"
+    final = _page_after(tree, seq, len(seq))
+    assert {n: v for n, v in final.items() if _in_subtree(tree, n, "s3")} == s3_before
+    # and at the end of the scope there is nothing further: other sections stay shut
+    assert all(n in final for n in ("s1", "s2", "s5"))
+
+
+def test_scoped_zoom_out_never_folds_sections_into_the_gist():
+    tree = _brief_tree()
+    reader = Reader(tree)
+    _gist_with_sections(reader)
+    _open_sections(reader, "s3", "s4")
+    shown = reader.shown()
+    anchor = next(n for n in shown if _in_subtree(tree, n, "s4"))
+    seq, floor, k0 = _scoped_build(tree, shown, anchor, "s4")
+    low = _page_after(tree, seq, floor)
+    assert "s4" in low and not low["s4"]
+    assert all(s in low for s in ("s1", "s2", "s5"))
+    assert {n for n in low if _in_subtree(tree, n, "s3")} == {n for n in shown if _in_subtree(tree, n, "s3")}
+
+
+def test_scope_none_is_the_unscoped_order():
+    tree = make_tree(3, "balanced")
+    for anchor in sorted(tree.nodes)[:6]:
+        assert expansion_sequence(tree, anchor, scope_id=None) == expansion_sequence(tree, anchor)

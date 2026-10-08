@@ -179,3 +179,57 @@ def test_js_visible_words_match_python_on_a_cjk_tree(tmp_path):
     assert js == [visible_words(tree, ["r"], set()), visible_words(tree, ["a", "b"], set())]
     assert js[0] == 5  # the hook "钩子一句话": five characters, not one word
     assert js[1] == 4 + 6 + 5 + 5  # title + two key points + leaf b
+
+
+SCOPED_SCRIPT = """
+const fs = require('fs');
+global.window = {};
+eval(fs.readFileSync(process.argv[1], 'utf8'));
+const cases = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const out = cases.map((c) => window.Frontier.buildExpansionSequence(c.tree, c.anchor, new Set(c.keep), c.scope));
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_scoped_sequences_match_js(tmp_path):
+    """A scope confines the order to one section; the JS and Python builders must agree on it."""
+    import random
+
+    from riemann.abstraction.frontier import frontier_at, prose_at
+    from tests.test_frontier_random import KINDS, make_tree
+
+    cases, expect = [], []
+    for seed in range(1, 9):
+        for kind in KINDS:
+            tree = make_tree(seed, kind)
+            cur = tree.root
+            while len(tree.nodes[cur].children) == 1:
+                cur = tree.nodes[cur].children[0]
+            if not tree.nodes[cur].children:
+                continue
+            rng = random.Random(f"scopeparity:{seed}:{kind}")
+            for _ in range(3):
+                old = expansion_sequence(tree, rng.choice(sorted(tree.nodes)))
+                k = rng.randint(0, len(old))
+                frontier = frontier_at(tree, old, k)
+                keep = _keep_for(tree, frontier, prose_at(old, k))
+                anchor = rng.choice(frontier)
+                scope = None
+                n = anchor
+                while n is not None:
+                    if n in tree.nodes[cur].children:
+                        scope = n
+                    n = tree.nodes[n].parent
+                if scope is None:
+                    continue
+                cases.append({"tree": tree.model_dump(), "anchor": anchor, "keep": sorted(keep), "scope": scope})
+                expect.append(expansion_sequence(tree, anchor, keep_expanded=keep, scope_id=scope))
+    assert len(cases) > 30
+    path = tmp_path / "cases.json"
+    path.write_text(json.dumps(cases))
+    js = json.loads(subprocess.run(
+        ["node", "-e", SCOPED_SCRIPT, str(ROOT / "web" / "frontier.js"), str(path)],
+        capture_output=True, text=True, check=True,
+    ).stdout)
+    assert js == expect

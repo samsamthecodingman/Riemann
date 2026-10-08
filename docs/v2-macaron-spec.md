@@ -209,20 +209,42 @@ left alone (`web/mathtext.js`, tested in `tests/test_web_math.py`).
 not depend on how KaTeX lays it out and offsets saved before maths was rendered still fit. A selection that starts or ends
 inside a formula takes the whole formula. Formulas are not searched.
 
-## Zoom goes where the pointer is
+## Zoom is local to a section
 
-The passage under the pointer when a zoom gesture starts is the anchor, and the dial follows it:
+A pointer zoom has a **scope**: the top-level section (a node in `tree.sections`) that contains the passage under the
+pointer, or is that passage. Pointer zooms are hold-Z drag, tap-Z plus wheel or swipe, Ctrl+wheel / pinch, and `=` / `-`
+while the pointer is over the content. Nothing outside the scope may change: no passage expands or folds, no
+prose/skim switch.
 
-- **In:** each step changes only that passage's own subtree (it switches to its prose, then opens into its parts, then
-  those do) until it is all paragraphs; only then does the zoom move on to its nearest neighbours (span-midpoint
-  distance). This holds from the gist, from a mixed page, after scrolling elsewhere, and for every way of zooming.
-- **Out:** the passage under the pointer folds first (its own prose, then its parts into their parent), then its nearest
-  neighbours, and the far passages last.
+- **In:** only tokens inside the scope's subtree are applied, nearest the pointer passage first (its own prose, its parts,
+  then its siblings within the section; distance is span-midpoint distance).
+- **Out:** only tokens inside the scope are undone, the pointer passage's own detail first. The floor is the section in
+  its most compact form: its title and bullets. A pointer zoom out never folds sections together into the gist.
+- **No dead steps:** every step visibly changes something inside the scope. The step-growth rule (a step must add at least
+  min(15%, 25 words) of visible text) is measured on the scope's own words, not the page's, and prefers changes at or near
+  the pinned passage, so the change is on screen.
+- **At the ends:** when the section is fully open (every leaf showing) or at its floor, further steps change nothing
+  anywhere. The pinned block gives a brief (150 ms) outline pulse, class `zoom-end`; with reduced motion the outline
+  shows without movement. No toast.
+- **Global zooms** keep the whole-document order: the **Less / More** buttons, **Home / End** and the arrow keys on the
+  dial, and `=` / `-` or any pointer zoom when the pointer is not over a section's content (the rail, the header, the
+  overview card, the gist). Home goes to the gist and End to the full text, from any mixed page.
+- **Other paths** (map click, search hit, section header, the nav, zoom history Alt+Left / Right) are global: a jump
+  opens just enough to reveal its target and folds nothing.
 
-How the sequence gets that: a new anchor rebuilds the sequence with the page as it is first (`keep_expanded`), the kept
-tokens **farthest from the anchor first** so the last one applied is the nearest, then everything else nearest first.
-A sequence only serves one direction well (going back up it would replay the kept tokens far-first), so when the dial
-turns round, `setZ` rebuilds it around the same anchor and the page as it is now. The scroll-driven re-anchor is
-ignored while a Z, Ctrl+wheel or wheel-in-Z gesture is going: the anchor is the passage under the pointer, never the
-screen centre. Trees read from the cache have any single-child chain collapsed (`cache.load_tree`), so an older tree
-zooms like a current one; the reader still copes with a chain.
+How: `expansion_sequence(..., scope_id)` / `buildExpansionSequence(tree, anchor, keep, scopeId)`. The page as it is
+comes first, as before, but the kept tokens **outside** the scope go first and the ones **inside** it after, farthest from
+the anchor first so the nearest is undone first on the way out. After that only in-scope tokens, nearest first, with the
+growth rule measured on the scope's words (`visible_words(..., scope_id)`). The sequence ends when the scope is fully open.
+`app.js` keeps `state.sequenceScope` and `state.seqFloor` (the number of kept tokens outside the scope); `setZ` clamps k to
+`[seqFloor, length]` for a scoped sequence, and a request beyond either end is a no-op with the end pulse. A new gesture
+with a different anchor or scope rebuilds the sequence around the page as it is (`sequenceKeepingPage`), a turn of
+direction rebuilds it with the same scope, and every global input rebuilds it unscoped (so Home / End and More / Less work
+from any mixed page; the header readout is always computed from what is visible). The scroll-driven re-anchor is ignored
+while a Z, Ctrl+wheel or wheel-in-Z gesture is going. `z` on a scoped sequence is k over that (shorter) sequence's length;
+it is only the dial's internal position and is re-expressed on every rebuild. Trees read from the cache have any
+single-child chain collapsed (`cache.load_tree`).
+
+Tests: `tests/test_zoom_gestures.py` (random trees and random mixed pages: every scoped step changes only the scope and
+always something in it, to the end and back to the floor), `tests/test_frontier_parity.py` (JS and Python agree on scoped
+sequences), and the e2e check `zoom_goes_where_the_pointer_is` (every pointer input over section 4 of a mixed page).

@@ -42,6 +42,11 @@
     // Which way the dial has been turning on the current sequence: +1 (in), -1 (out), 0 (not yet).
     // A sequence only serves one direction well (see setZ), so reversing rebuilds it.
     seqDir: 0,
+    // A pointer zoom is confined to the top-level section under the pointer: sequenceScope is that
+    // section (null: the whole document) and seqFloor the number of leading tokens outside it, which
+    // a scoped zoom never goes below. See sequenceKeepingPage and setZ.
+    sequenceScope: null,
+    seqFloor: 0,
     anchorOffset: null,
     minimalChrome: false,
     eventSource: null,
@@ -434,12 +439,20 @@
   // what's on screen: the currently expanded nodes stay first in the new
   // sequence and z is re-expressed against it, so the next step changes
   // exactly one passage instead of reshuffling the page.
-  function sequenceKeepingPage(anchorId) {
+  //
+  // scopeId (a top-level section, or null) confines the sequence to that section's subtree: the
+  // tokens outside it come first and state.seqFloor counts them, so a scoped zoom can neither
+  // undo nor apply anything outside the section (see buildExpansionSequence).
+  function sequenceKeepingPage(anchorId, scopeId) {
     const nodes = state.tree.nodes;
+    scopeId = scopeId || null;
     state.seqDir = 0;
+    state.seqFloor = 0;
+    state.sequenceScope = null;
     if (!state.frontier || !state.frontier.length) {
       return window.Frontier.buildExpansionSequence(state.tree, anchorId);
     }
+    state.sequenceScope = scopeId;
     const P = window.Frontier.PROSE;
     const keep = new Set();
     const onPage = new Set(state.frontier);
@@ -451,7 +464,12 @@
       }
     }
     for (const id of state.prose) if (onPage.has(id) && id !== state.tree.root) keep.add(P + id);
-    const seq = window.Frontier.buildExpansionSequence(state.tree, anchorId, keep);
+    const seq = window.Frontier.buildExpansionSequence(state.tree, anchorId, keep, scopeId);
+    if (scopeId) {
+      state.seqFloor = [...keep].filter(
+        (t) => !window.Frontier.underScope(state.tree, t.charAt(0) === P ? t.slice(1) : t, scopeId)
+      ).length;
+    }
     if (seq.length) state.z = keep.size / seq.length;
     return seq;
   }
@@ -461,14 +479,15 @@
   // was actually built around. Rebuild whenever they differ, or a zoom
   // started over one passage would keep following an older anchor's order
   // and open something elsewhere on the page.
-  function setAnchor(nodeId) {
+  function setAnchor(nodeId, scopeId) {
+    scopeId = scopeId || null;
     const prev = state.anchorNodeId;
     state.anchorNodeId = nodeId;
     state.pinMode = "point";
     const n = state.tree.nodes[nodeId];
     state.anchorOffset = n ? (n.source_span[0] + n.source_span[1]) / 2 : null;
-    if (nodeId !== state.sequenceAnchor) {
-      state.sequence = sequenceKeepingPage(nodeId);
+    if (nodeId !== state.sequenceAnchor || scopeId !== state.sequenceScope) {
+      state.sequence = sequenceKeepingPage(nodeId, scopeId);
       state.sequenceAnchor = nodeId;
     }
     if (prev !== nodeId) {
@@ -1673,15 +1692,37 @@
   // ---------------------------------------------------------------------
   // Dial control
   // ---------------------------------------------------------------------
+  // The end of a scoped zoom (the section is all paragraphs, or as compact as it gets): a brief
+  // outline pulse on the pinned block, no motion when the reader asked for none, and no toast.
+  let nudgeTimer = null;
+  function nudgeAtEnd() {
+    const id = state.anchorNodeId;
+    const block = id && $content.querySelector(`[data-node-id="${id}"]`);
+    if (!block) return;
+    block.classList.remove("zoom-end");
+    void block.offsetWidth; // restart the pulse if it is already showing
+    block.classList.add("zoom-end");
+    clearTimeout(nudgeTimer);
+    nudgeTimer = setTimeout(() => block.classList.remove("zoom-end"), 400);
+  }
+
   function setZ(newZ, inputType, forcedBeforeY) {
     markInput();
     state.lastDialChangeAt = Date.now();
-    const clamped = Math.max(0, Math.min(1, newZ));
+    // A scoped sequence (a pointer zoom over a section) only has room between its floor, the tokens
+    // outside the section, and its end, where the section is fully open. Asking for more is not
+    // a step: nothing changes, and the pinned block says so quietly.
+    const scoped = state.sequenceScope != null && state.sequence && state.sequence.length > 0;
+    const floorZ = scoped ? state.seqFloor / state.sequence.length : 0;
+    const clamped = Math.max(floorZ, Math.min(1, newZ));
     const zFrom = state.z;
     if (state.sequence && state.frontier &&
         window.Frontier.zToK(clamped, state.sequence.length) === window.Frontier.zToK(zFrom, state.sequence.length)) {
+      const askedK = Math.round(newZ * state.sequence.length);
+      const haveK = window.Frontier.zToK(zFrom, state.sequence.length);
       state.z = clamped;
       updateReadout();
+      if (scoped && askedK !== haveK) nudgeAtEnd();
       return;
     }
     if (!state.anchorNodeId) setAnchor(findCentreNodeId());
@@ -1697,8 +1738,15 @@
       window.Frontier.zToK(clamped, state.sequence.length) - window.Frontier.zToK(zFrom, state.sequence.length);
     const dir = Math.sign(stepsAsked);
     if (state.seqDir && dir && dir !== state.seqDir && state.sequenceAnchor && state.tree.nodes[state.sequenceAnchor]) {
-      state.sequence = sequenceKeepingPage(state.sequenceAnchor);
+      const scope = state.sequenceScope;
+      state.sequence = sequenceKeepingPage(state.sequenceAnchor, scope);
       target = clamped <= 0 ? 0 : clamped >= 1 ? 1 : Math.max(0, Math.min(1, state.z + stepsAsked / Math.max(1, state.sequence.length)));
+      if (scope) target = Math.max(state.seqFloor / Math.max(1, state.sequence.length), target);
+      if (window.Frontier.zToK(target, state.sequence.length) === window.Frontier.zToK(state.z, state.sequence.length)) {
+        updateReadout();
+        if (scope) nudgeAtEnd();
+        return;
+      }
     }
     if (dir) state.seqDir = dir;
 
@@ -1818,7 +1866,10 @@
     }
   }
 
-  function beginPointerGesture(px, py) {
+  // global: step the whole document (the Less / More buttons and the dial's own keys), wherever the
+  // pointer is. Otherwise the zoom is confined to the top-level section under the pointer, unless
+  // the pointer is over the overview card, the gist or outside the content (the rail, the header).
+  function beginPointerGesture(px, py, global) {
     let x = px;
     let y = py;
     if (x == null || y == null) {
@@ -1827,14 +1878,20 @@
     }
     let anchorId;
     let anchorY;
+    let scopeId = null;
     if (isPointOverContent(x, y)) {
+      const hit = document.elementFromPoint(x, y);
+      const overOverview = !!(hit && hit.closest && hit.closest(".overview-card"));
       anchorId = nodeAtScreenPoint(x, y) || findCentreNodeId();
       anchorY = y;
+      if (!global && !overOverview) scopeId = sectionAncestor(state.tree, anchorId);
     } else {
       anchorId = findCentreNodeId();
       anchorY = window.innerHeight / 2;
     }
-    if (anchorId && (anchorId !== state.anchorNodeId || anchorId !== state.sequenceAnchor)) setAnchor(anchorId);
+    if (anchorId && (anchorId !== state.anchorNodeId || anchorId !== state.sequenceAnchor || scopeId !== state.sequenceScope)) {
+      setAnchor(anchorId, scopeId);
+    }
     const elAnchor = anchorId && $content.querySelector(`[data-node-id="${anchorId}"]`);
     if (!elAnchor) return anchorY;
     const rect = elAnchor.getBoundingClientRect();
@@ -1908,9 +1965,9 @@
     });
   }
 
-  function stepOnce(deltaSteps, inputType) {
+  function stepOnce(deltaSteps, inputType, global) {
     if (!state.tree || deltaSteps === 0) return;
-    const anchorY = beginPointerGesture(lastMouse.x, lastMouse.y);
+    const anchorY = beginPointerGesture(lastMouse.x, lastMouse.y, global);
     const total = Math.max(1, state.sequence.length);
     setZ(state.z + deltaSteps / total, inputType, anchorY);
     endPin(900);
@@ -1923,7 +1980,7 @@
     if (!state.tree) return;
     const cx = window.innerWidth / 2;
     const cy = window.innerHeight / 2;
-    const anchorY = beginPointerGesture(cx, cy);
+    const anchorY = beginPointerGesture(cx, cy, true);
     const total = Math.max(1, state.sequence.length);
     setZ(state.z + deltaSteps / total, "key", anchorY);
     endPin(900);
@@ -1932,23 +1989,33 @@
   el("zoom-less").addEventListener("click", () => stepAtViewportCentre(-1));
   el("zoom-more").addEventListener("click", () => stepAtViewportCentre(1));
 
+  // The whole-document sequence for the page as it is, if a pointer zoom left a section-scoped one.
+  function goGlobal() {
+    if (!state.tree || state.sequenceScope == null) return;
+    const anchor = state.sequenceAnchor && state.tree.nodes[state.sequenceAnchor] ? state.sequenceAnchor : findCentreNodeId();
+    state.sequence = sequenceKeepingPage(anchor, null);
+    state.sequenceAnchor = anchor;
+  }
+
   // ---- Keyboard: arrow keys / Home / End on the focused dial ----
   $dial.addEventListener("keydown", (e) => {
     switch (e.key) {
       case "ArrowRight":
         e.preventDefault();
-        stepOnce(e.shiftKey ? 5 : 1, "key");
+        stepOnce(e.shiftKey ? 5 : 1, "key", true);
         break;
       case "ArrowLeft":
         e.preventDefault();
-        stepOnce(e.shiftKey ? -5 : -1, "key");
+        stepOnce(e.shiftKey ? -5 : -1, "key", true);
         break;
       case "Home":
         e.preventDefault();
+        goGlobal();
         setZ(0, "key");
         break;
       case "End":
         e.preventDefault();
+        goGlobal();
         setZ(1, "key");
         break;
     }
@@ -2342,7 +2409,7 @@
       state.anchorNodeId = anchor;
       state.anchorOffset = e.anchorOffset;
       state.pinMode = "point";
-      state.sequence = sequenceKeepingPage(anchor);
+      state.sequence = sequenceKeepingPage(anchor, null);
       state.sequenceAnchor = anchor;
       resetTopSpacer();
       render({});
@@ -2627,6 +2694,8 @@
       resetTopSpacer();
       state.sequence = seq;
       state.sequenceAnchor = N;
+      state.sequenceScope = null;
+      state.seqFloor = 0;
       state.seqDir = 0;
       state.z = targetK(seq) / Math.max(1, seq.length);
       const r = F.frontierAtZ(tree, seq, state.z);
@@ -2833,6 +2902,8 @@
     const anchorId = (saved && saved.anchor_node_id && tree.nodes[saved.anchor_node_id]) ? saved.anchor_node_id : tree.root;
     state.sequence = window.Frontier.buildExpansionSequence(tree, anchorId);
     state.sequenceAnchor = anchorId;
+    state.sequenceScope = null;
+    state.seqFloor = 0;
     state.seqDir = 0;
     state.anchorNodeId = anchorId;
     state.anchorOffset = saved ? saved.anchor_offset : null;

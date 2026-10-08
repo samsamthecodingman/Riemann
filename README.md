@@ -20,7 +20,7 @@ Every document opens as a short gist: section titles with two or three skim bull
 
 ![Gist view: section titles with skim bullets](docs/screenshots/gist.png)
 
-Zoom in and the section you're pointing at unfolds into titled sub-points, then prose, then the original text. Nothing else on the page moves.
+Zoom in and the section you're pointing at unfolds into titled sub-points, then prose, then the original text. Zooming over a section only ever changes that section: every step shows a change there, and when it is fully open (or as compact as it gets) the block gives a brief outline pulse and nothing else on the page moves.
 
 ![One level deeper: titled sub-points under the section](docs/screenshots/skim.png)
 
@@ -28,11 +28,11 @@ Zoom in and the section you're pointing at unfolds into titled sub-points, then 
 
 | Input | Zoom |
 |---|---|
-| Mouse | Hold **Z** and move the mouse left or right over a passage |
+| Mouse | Hold **Z** and move the mouse left or right over a passage (zooms that section only) |
 | Trackpad | Tap **Z**, then scroll or swipe with two fingers (tap Z again, press Esc or pause to stop) |
 | Pinch | Pinch on the trackpad (or Ctrl + scroll wheel) |
-| Keyboard | **=** / **−** step the whole page. With the zoom control focused (Tab to it), **Home** / **End** jump to the gist or the full text and the arrow keys step |
-| Buttons | **− Less** / **More +** in the header |
+| Keyboard | **=** / **−** zoom the section under the pointer (the whole page when the pointer is off the text, over the overview card or the gist). With the zoom control focused (Tab to it), **Home** / **End** jump to the gist or the full text and the arrow keys step the whole page |
+| Buttons | **− Less** / **More +** in the header step the whole page |
 
 The header always shows roughly how long the current view takes to read and what share of the original it covers.
 

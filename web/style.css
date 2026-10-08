@@ -1182,6 +1182,22 @@ button.source-link:focus-visible .source-link-more {
   outline-color: color-mix(in srgb, var(--sec-n, var(--hl)), var(--text) 40%);
   border-radius: 10px;
 }
+/* End of a section-scoped zoom (fully open, or as compact as it gets): a 150 ms outline pulse on the
+   pinned block. With reduced motion the outline just shows, without the movement. */
+.node.zoom-end {
+  outline-color: color-mix(in srgb, var(--sec-n, var(--hl)), var(--text) 60%);
+  border-radius: 10px;
+  transition: none;
+  animation: zoom-end-pulse 150ms ease-out;
+}
+@keyframes zoom-end-pulse {
+  0% { outline-offset: 10px; }
+  50% { outline-offset: 5px; }
+  100% { outline-offset: 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .node.zoom-end { animation: none; }
+}
 
 .node-body {
   font-family: var(--ui);

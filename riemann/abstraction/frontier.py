@@ -131,15 +131,27 @@ def _skim_words(node) -> int:
     return _count(node.title or _first_clause(node.text)) + sum(_count(p) for p in points)
 
 
-def visible_words(tree: Tree, frontier: list[str], prose: set[str]) -> int:
+def under_scope(tree: Tree, nid: str | None, scope_id: str) -> bool:
+    """True when node `nid` is `scope_id` or lies in its subtree."""
+    while nid is not None:
+        if nid == scope_id:
+            return True
+        nid = tree.nodes[nid].parent
+    return False
+
+
+def visible_words(tree: Tree, frontier: list[str], prose: set[str], scope_id: str | None = None) -> int:
     """Words on the page for a frontier and prose set, as web/app.js renders
     it: a lone root is its hook line; a skim node is its title plus its key
-    points; anything else is the node's own text."""
-    if len(frontier) == 1 and frontier[0] == tree.root:
+    points; anything else is the node's own text. With ``scope_id``, only the
+    words of the passages inside that node's subtree."""
+    if scope_id is None and len(frontier) == 1 and frontier[0] == tree.root:
         root = tree.nodes[tree.root]
         return _count(root.hook or root.text)
     total = 0
     for nid in frontier:
+        if scope_id is not None and not under_scope(tree, nid, scope_id):
+            continue
         node = tree.nodes[nid]
         total += _skim_words(node) if _is_skim(tree, node, prose) else node.words
     return total
@@ -155,6 +167,7 @@ def expansion_sequence(
     anchor_id: str | None = None,
     start_frontier: set[str] | None = None,
     keep_expanded: set[str] | None = None,
+    scope_id: str | None = None,
 ) -> list[str]:
     """Compute the full ordered zoom sequence from a starting frontier.
 
@@ -193,6 +206,18 @@ def expansion_sequence(
     replay that order, so a reader that reverses direction rebuilds the
     sequence (app.js setZ); going up from the page itself, the rest of the
     sequence is anchor-first (nearest first).
+
+    scope_id: a node (a top-level section) that confines the zoom. Everything
+    in the sequence after the tokens outside the scope is inside it: the kept
+    tokens outside the scope come first (they are never undone by a scoped
+    zoom), then the kept tokens inside it, farthest from the anchor first so the
+    nearest is undone first on the way out; then only tokens inside the scope
+    (nearest first), with the step-growth rule measured on the scope's own
+    visible words. The sequence therefore ends when the scope is fully open,
+    however much of the rest of the page is not. The caller keeps k between
+    the number of kept tokens outside the scope and ``len(sequence)``. The
+    scope's ancestors must already be applied (any page that shows the anchor
+    has them). ``None``: the whole document, as above.
     """
     anchor = anchor_id or tree.root
     keep = set(keep_expanded or ())
@@ -211,28 +236,42 @@ def expansion_sequence(
     def internal_frontier() -> list[str]:
         return [n for n in _frontier_of(tree, expanded) if not tree.nodes[n].is_leaf]
 
-    # 1. The page as it is now, one plain step per applied token.
-    remaining = set(keep)
-    while remaining:
-        front = set(internal_frontier())
-        avail = [
-            t for t in remaining
-            if _token_node(t) in front and (t == _token_node(t) or _token_node(t) != tree.root)
-        ]
-        if not avail:
-            break
-        best = max(avail, key=key)  # farthest from the anchor first (see the docstring)
-        remaining.discard(best)
-        sequence.append(best)
-        _apply(tree, expanded, prose, best)
+    def scoped_frontier() -> list[str]:
+        if scope_id is None:
+            return internal_frontier()
+        return [n for n in internal_frontier() if under_scope(tree, n, scope_id)]
+
+    def words() -> int:
+        return visible_words(tree, _frontier_of(tree, expanded), prose, scope_id)
+
+    # 1. The page as it is now, one plain step per applied token. With a scope,
+    # the tokens outside it go first and the ones inside it after.
+    if scope_id is None:
+        passes = [set(keep)]
+    else:
+        inside = {t for t in keep if under_scope(tree, _token_node(t), scope_id)}
+        passes = [keep - inside, inside]
+    for remaining in passes:
+        while remaining:
+            front = set(internal_frontier())
+            avail = [
+                t for t in remaining
+                if _token_node(t) in front and (t == _token_node(t) or _token_node(t) != tree.root)
+            ]
+            if not avail:
+                break
+            best = max(avail, key=key)  # farthest from the anchor first (see the docstring)
+            remaining.discard(best)
+            sequence.append(best)
+            _apply(tree, expanded, prose, best)
 
     # 2. Everything else, merging steps that add too little.
     committed = (set(expanded), set(prose))
-    v0 = visible_words(tree, _frontier_of(tree, expanded), prose)
+    v0 = words()
     pending: list[str] = []
     while True:
         cands = []
-        for nid in internal_frontier():
+        for nid in scoped_frontier():
             cands.append(nid if nid == tree.root or nid in prose else PROSE + nid)
         if pending:
             work = (set(expanded), set(prose))
@@ -248,7 +287,7 @@ def expansion_sequence(
                 # Nothing can continue the tentative steps: emit the last one alone.
                 sequence.append(pending[-1])
                 committed = (set(expanded), set(prose))
-                v0 = visible_words(tree, _frontier_of(tree, expanded), prose)
+                v0 = words()
                 pending = []
                 continue
             cands = allowed
@@ -257,7 +296,7 @@ def expansion_sequence(
         best = min(cands, key=key)
         _apply(tree, expanded, prose, best)
         pending.append(best)
-        v1 = visible_words(tree, _frontier_of(tree, expanded), prose)
+        v1 = words()
         # A pass-through level (one child) never counts as content: not its
         # prose, not its expansion, and not a page that newly shows one.
         was = set(_frontier_of(tree, committed[0]))
